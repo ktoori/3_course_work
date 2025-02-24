@@ -1,8 +1,6 @@
 from pymongo import MongoClient
 from datetime import datetime
 
-import ReadFile
-
 # Подключение к MongoDB
 client = MongoClient("mongodb://localhost:27017/")
 db = client['database']
@@ -64,12 +62,13 @@ def delete_document_db(doc_id):
         return 0
 
 
-def update_document_db(doc_id, new_content, new_title=None, new_category=None):
+def update_document_db(doc_id, new_content, new_tags, new_title=None, new_category=None):
     from bson import ObjectId
     try:
         doc_id = ObjectId(doc_id)
         update_data = {
             "content": new_content,
+            "tags": new_tags,
             "updated_at": datetime.utcnow()
         }
         if new_title:

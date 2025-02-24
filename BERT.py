@@ -10,7 +10,7 @@ tokenizer = AutoTokenizer.from_pretrained("cointegrated/rubert-tiny2")
 model = AutoModel.from_pretrained("cointegrated/rubert-tiny2")
 
 query = "Код программной инженерии"
-document = ReadFile.extract_pdf_text("napravlenia.pdf")
+document = ReadFile.extract_pdf_text("documents/napravlenia.pdf")
 
 def get_embedding(text):
     inputs = tokenizer(text, return_tensors='pt', padding=True, truncation=True)

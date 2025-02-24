@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 import ReadFile
 import mongoDB
+import CreateTags
 
 app = FastAPI()
 
@@ -14,7 +15,8 @@ async def upload_document(file: UploadFile):
     elif file.filename.endswith('.xlsx'):
         content = ReadFile.extract_xlsx_text(file.file)
     title = file.filename
-    mongoDB.upload_document_to_db(title, content, user="students", category="manual")
+    tags = CreateTags.extract_keywords(content)
+    mongoDB.upload_document_to_db(title, content, user="students", category="manual", tags= tags)
 
     return {"message": "Document upload successfully"}
 
@@ -43,7 +45,8 @@ async def update_document(file_id: str, file: UploadFile):
         content = ReadFile.extract_docx_text(file.file)
     elif file.filename.endswith('.xlsx'):
         content = ReadFile.extract_xlsx_text(file.file)
-    mongoDB.update_document_db(file_id, content)
+    tags = CreateTags.extract_keywords(content)
+    mongoDB.update_document_db(file_id, content, tags)
     return {"message": "Document update successfully"}
 
 if __name__ == '__main__':
