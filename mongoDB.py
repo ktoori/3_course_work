@@ -1,17 +1,18 @@
 from pymongo import MongoClient
 from datetime import datetime
 
-# Подключение к MongoDB
 client = MongoClient("mongodb://localhost:27017/")
 db = client['database']
-collection = db["documents"]
+docs_collection = db["documents"]
+tags_collection = db['tags']
+
+const_tags = ['Расписание']
+tags_collection.delete_many({})
+tags_collection.insert_many([{"name": tag, "documents": []} for tag in const_tags])
 
 
 def upload_document_to_db(title, content,file_path, user, category, tags=None):
-    """
-    Добавляет документ в MongoDB с указанием пути к файлу.
-    """
-    duplicate = collection.find_one({
+    duplicate = docs_collection.find_one({
         "$or": [
             {"title": title},
             {"file_path": file_path},
@@ -33,18 +34,27 @@ def upload_document_to_db(title, content,file_path, user, category, tags=None):
         "created_at": datetime.utcnow()
     }
 
-    result = collection.insert_one(document)
-    print(f"Документ успешно загружен. ID: {result.inserted_id}")
-    return result.inserted_id
+    documnet_id = docs_collection.insert_one(document).inserted_id
+    #print(f"Документ успешно загружен. ID: {documnet_id}")
+
+    use_flag = 0
+    for tag in tags:
+        if tag in const_tags:
+            use_flag = 1
+            tags_collection.update_one(
+                {'name': tag},
+                {'$push': {'documents': {'_id': documnet_id, 'file_path': file_path}}}
+            )
+    if use_flag == 0:
+        tags_collection.insert_one({"name": tags[0], "documents": [{'_id': documnet_id, 'file_path': file_path}]})
+
+    return documnet_id
 
 def get_document_db(doc_id):
-    """
-    Получает документ из MongoDB по его ID.
-    """
     from bson import ObjectId
     try:
         doc_id = ObjectId(doc_id)
-        document = collection.find_one({"_id": doc_id})
+        document = docs_collection.find_one({"_id": doc_id})
         if document:
             return document
         else:
@@ -55,15 +65,21 @@ def get_document_db(doc_id):
         return None
 
 def delete_document_db(doc_id):
-    """
-    Удаляет документ из MongoDB по его ID.
-    """
     from bson import ObjectId
     try:
         doc_id = ObjectId(doc_id)
-        result = collection.delete_one({"_id": doc_id})
+        document = docs_collection.find_one({"_id": doc_id})
+        if document:
+            tags = document.get("tags")
+        result = docs_collection.delete_one({"_id": doc_id})
         if result.deleted_count > 0:
             print("Документ успешно удален.")
+            for tag in tags:
+                if tag in const_tags:
+                    tags_collection.update_one(
+                        {'name': tag},
+                        {'$pull': {'documents': {'_id': doc_id}}}
+                    )
         else:
             print("Документ не найден.")
         return result.deleted_count
@@ -72,9 +88,6 @@ def delete_document_db(doc_id):
         return 0
 
 def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_title=None, new_category=None):
-    """
-    Обновляет документ в MongoDB, включая путь к файлу.
-    """
     from bson import ObjectId
     try:
         doc_id = ObjectId(doc_id)
@@ -90,7 +103,7 @@ def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_titl
             update_data["category"] = new_category
         if new_tags:
             update_data["tags"] = new_tags
-        result = collection.update_one({"_id": doc_id}, {"$set": update_data})
+        result = docs_collection.update_one({"_id": doc_id}, {"$set": update_data})
         if result.modified_count > 0:
             print("Документ успешно обновлен.")
         else:

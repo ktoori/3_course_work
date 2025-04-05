@@ -1,10 +1,12 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 import nltk
 from starlette.responses import FileResponse
 import os
 import ReadFile
 import mongoDB
-import CreateTags
+import CreateTags2
+from typing import Optional
+
 nltk.download('punkt_tab')
 
 app = FastAPI()
@@ -24,7 +26,7 @@ def save_file_to_server(file: UploadFile) -> str:
     return file_location
 
 @app.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(file: UploadFile = File(...), tags: Optional[str] = Form(None)):
     content = ""
     if file.filename.endswith('.pdf'):
         content = ReadFile.extract_pdf_text(file.file)
@@ -34,8 +36,13 @@ async def upload_document(file: UploadFile = File(...)):
         content = ReadFile.extract_xlsx_text(file.file)
     file_path = save_file_to_server(file)
     title = file.filename
-    tags = CreateTags.extract_keywords(content)
-    doc_id = mongoDB.upload_document_to_db(title, content,file_path, user="students", category="manual", tags= tags)
+    if not tags:
+        tags = CreateTags2.extract_keywords(content)
+        tags.append(file.filename)
+    else:
+        tags = tags.split(",")
+    #doc_id = mongoDB.upload_document_to_db(title, content,file_path, user="students", category="manual", tags= tags)
+    doc_id = mongoDB.upload_document_to_db(title, content, file_path, user="students", category="manual", tags=tags)
     if not doc_id:
         raise HTTPException(status_code=400, detail="Документ уже существует в базе данных")
 
@@ -56,13 +63,13 @@ async def get_document(file_id: str):
     else:
         raise HTTPException(status_code=404, detail="Документ не найден")
 
-'''@app.get("/download/{doc_id}")        #через swagger работает
+@app.get("/download/{doc_id}")        #через swagger работает
 async def download_document(doc_id: str):
     document = mongoDB.get_document_db(doc_id)
     if document and os.path.exists(document['file_path']):
         return FileResponse(document['file_path'], filename=document['title'])
     else:
-        raise HTTPException(status_code=404, detail="Файл не найден")'''
+        raise HTTPException(status_code=404, detail="Файл не найден")
 
 @app.delete("/document/{id}")
 async def delete_document(file_id: str):
@@ -92,7 +99,7 @@ async def update_document(file_id: str, file: UploadFile):
             content = ReadFile.extract_docx_text(file.file)
         elif file.filename.endswith('.xlsx'):
             content = ReadFile.extract_xlsx_text(file.file)
-        tags = CreateTags.extract_keywords(content)
+        tags = CreateTags2.extract_keywords(content)
         # Удаляем старый файл с сервера
         if os.path.exists(document['file_path']):
             os.remove(document['file_path'])
