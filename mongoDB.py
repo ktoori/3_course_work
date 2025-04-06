@@ -1,5 +1,6 @@
 from pymongo import MongoClient
 from datetime import datetime
+import CreateTags2
 
 client = MongoClient("mongodb://localhost:27017/")
 db = client['database']
@@ -7,8 +8,8 @@ docs_collection = db["documents"]
 tags_collection = db['tags']
 
 const_tags = ['Расписание']
-tags_collection.delete_many({})
-tags_collection.insert_many([{"name": tag, "documents": []} for tag in const_tags])
+if tags_collection.count_documents({}) == 0:
+    tags_collection.insert_many([{"name": tag, "documents": []} for tag in const_tags])
 
 
 def upload_document_to_db(title, content,file_path, user, category, tags=None):
@@ -112,3 +113,49 @@ def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_titl
     except Exception as e:
         print(f"Ошибка: {str(e)}")
         return 0
+
+
+def search_by_tag(query):
+
+    query_words = CreateTags2.to_nominative_case(query).split()
+    tags = list(db.tags.find({}))
+    best_tag = None
+    best_count = 0
+
+    for tag in tags:
+        tag_name = tag['name'].lower()
+        match_count = sum(tag_name.count(word) for word in query_words)
+        if match_count > best_count:
+            best_count = match_count
+            best_tag = tag
+
+    if best_tag is None:
+        return 11
+
+    documents = []
+    if "documents" in best_tag:
+        documents.extend(best_tag["documents"])
+
+    scored_documents = []
+
+    for document in documents:
+        score = 0
+        id = document['_id']
+        document = get_document_db(id)
+        document_title = document['title'].lower()
+        document_tags = document['tags']
+        for word in query_words:
+            score += document_title.count(word)
+        for word in query_words:
+            for w_tag in document_tags:
+                if w_tag.lower() == word:
+                    score += 1
+        if score > 0:
+            scored_documents.append((score, document))
+
+    top_documents = sorted(scored_documents, key=lambda x: x[0], reverse=True)[:3]
+
+    if len(top_documents) == 0:
+        return 22
+    else:
+        return top_documents

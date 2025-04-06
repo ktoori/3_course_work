@@ -5,7 +5,7 @@ import os
 import ReadFile
 import mongoDB
 import CreateTags2
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 nltk.download('punkt_tab')
 
@@ -48,12 +48,20 @@ async def upload_document(file: UploadFile = File(...), tags: Optional[str] = Fo
 
     return {"message": "Документ успешно загружен", "file_id": str(doc_id)}
 
-
 @app.get("/search")
 async def search(query: str):
-    #results = search_documents(query)
-    results = "Документ найден"
-    return results
+    result = mongoDB.search_by_tag(query)
+    if result == 11:
+        raise HTTPException(status_code=404, detail="Тег не найден")
+    elif result == 22:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    else:
+        answer = []
+        for docs in result:
+            object_id = docs[1]["_id"]
+            answer.append(str(object_id))
+        return ' '.join(answer)
+
 
 @app.get("/document/{id}")
 async def get_document(file_id: str):
