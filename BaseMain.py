@@ -96,7 +96,7 @@ async def delete_document(file_id: str):
         raise HTTPException(status_code=404, detail="Документ не найден")
 
 
-@app.post("/update/{id}")
+@app.put("/update/{id}")
 async def update_document(file_id: str, file: UploadFile):
     document = mongoDB.get_document_db(file_id)
     if document:
