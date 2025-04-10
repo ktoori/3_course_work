@@ -6,6 +6,7 @@ import ReadFile
 import mongoDB
 import CreateTags2
 from typing import Optional, List, Dict, Any
+from pathlib import Path
 
 nltk.download('punkt_tab')
 
@@ -20,9 +21,13 @@ if not os.path.exists(UPLOAD_DIRECTORY):
 
 # Функция для сохранения файла на сервере
 def save_file_to_server(file: UploadFile) -> str:
-    file_location = os.path.join(UPLOAD_DIRECTORY, file.filename)
+    file_name = Path(file.filename).name
+    file_location = os.path.join(UPLOAD_DIRECTORY, file_name)
+    file.file.seek(0)
+    content = file.file.read()
     with open(file_location, "wb") as buffer:
-        buffer.write(file.file.read())
+        buffer.write(content)
+    print(f"[DEBUG] Файл сохранен: {file_location} ({len(content)} байт)")
     return file_location
 
 @app.post("/upload")
@@ -34,6 +39,8 @@ async def upload_document(file: UploadFile = File(...), tags: Optional[str] = Fo
         content = ReadFile.extract_docx_text(file.file)
     elif file.filename.endswith('.xlsx'):
         content = ReadFile.extract_xlsx_text(file.file)
+
+    content = ReadFile.clean_text(content) if content else ""
     file_path = save_file_to_server(file)
     title = file.filename
     if not tags:
