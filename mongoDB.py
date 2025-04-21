@@ -7,9 +7,11 @@ db = client['database']
 docs_collection = db["documents"]
 tags_collection = db['tags']
 
-const_tags = ['Расписание']
+const_tags = ['Расписание', 'ПИ', 'ПМИ', 'Курсовая работа', '3 курс', 'Заявление']
+const_tags = [tag.lower() for tag in const_tags]
+
 if tags_collection.count_documents({}) == 0:
-    tags_collection.insert_many([{"name": tag, "documents": []} for tag in const_tags])
+    tags_collection.insert_many([{"name": tag.lower(), "documents": []} for tag in const_tags])
 
 
 def upload_document_to_db(title, content,file_path, user, category, tags=None):
@@ -25,21 +27,22 @@ def upload_document_to_db(title, content,file_path, user, category, tags=None):
         print(f"Документ уже существует в базе данных: {title}")
         return None
 
+    lower_tags = [tag.lower() for tag in tags]
+
     document = {
         "title": title,
         "content": content,
         "file_path": file_path,  # Путь к файлу на сервере
         "user": user,             # students, teacher
         "category": category,     # schedule, template, manual, instructions
-        "tags": tags if tags else [],
+        "tags": lower_tags if lower_tags else [],
         "created_at": datetime.utcnow()
     }
 
     documnet_id = docs_collection.insert_one(document).inserted_id
-    #print(f"Документ успешно загружен. ID: {documnet_id}")
 
     use_flag = 0
-    for tag in tags:
+    for tag in lower_tags:
         if tag in const_tags:
             use_flag = 1
             tags_collection.update_one(
@@ -114,48 +117,36 @@ def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_titl
         print(f"Ошибка: {str(e)}")
         return 0
 
+def get_documents_by_tag(tag_name):
+    tag = tags_collection.find_one({"name": tag_name}, {"documents": 1})
+    if tag:
+        return tag.get("documents", [])
+    else:
+        return None
+
 
 def search_by_tag(query):
 
     query_words = CreateTags2.to_nominative_case(query).split()
-    tags = list(db.tags.find({}))
-    best_tag = None
-    best_count = 0
+    keyword_set = set(query_words)
+    relevance_scores = []
+    seen_ids = set()
 
-    for tag in tags:
-        tag_name = tag['name'].lower()
-        match_count = sum(tag_name.count(word) for word in query_words)
-        if match_count > best_count:
-            best_count = match_count
-            best_tag = tag
+    for word in query_words:
+        word_docs = get_documents_by_tag(word)
+        if word_docs:
+            for doc_id in word_docs:
+                if str(doc_id) not in seen_ids:
+                    seen_ids.add(str(doc_id))
+                else:
+                    continue
+                doc = docs_collection.find_one({"_id": doc_id['_id']})
+                doc_tags_set = set(doc['tags'])
+                matches = keyword_set.intersection(doc_tags_set)
+                relevance_scores.append((str(doc_id['_id']), len(matches)))
 
-    if best_tag is None:
-        return 11
-
-    documents = []
-    if "documents" in best_tag:
-        documents.extend(best_tag["documents"])
-
-    scored_documents = []
-
-    for document in documents:
-        score = 0
-        id = document['_id']
-        document = get_document_db(id)
-        document_title = document['title'].lower()
-        document_tags = document['tags']
-        for word in query_words:
-            score += document_title.count(word)
-        for word in query_words:
-            for w_tag in document_tags:
-                if w_tag.lower() == word:
-                    score += 1
-        if score > 0:
-            scored_documents.append((score, document))
-
-    top_documents = sorted(scored_documents, key=lambda x: x[0], reverse=True)[:3]
-
-    if len(top_documents) == 0:
-        return 22
-    else:
-        return top_documents
+    sorted_documents = sorted(relevance_scores, key=lambda x: x[1], reverse=True)
+    result = []
+    for case in sorted_documents:
+        result.append(case[0])
+    return result
