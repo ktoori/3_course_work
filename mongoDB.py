@@ -1,6 +1,8 @@
 from pymongo import MongoClient
 from datetime import datetime
 import CreateTags2
+import pytz
+import SimilarText
 
 client = MongoClient("mongodb://localhost:27017/")
 db = client['database']
@@ -29,6 +31,10 @@ def upload_document_to_db(title, content,file_path, user, category, tags=None):
 
     lower_tags = [tag.lower() for tag in tags]
 
+    moscow_tz = pytz.timezone('Europe/Moscow')
+    current_time_msk = datetime.now(moscow_tz)
+    formatted_time = current_time_msk.strftime('%Y-%m-%d %H:%M:%S')
+
     document = {
         "title": title,
         "content": content,
@@ -36,19 +42,20 @@ def upload_document_to_db(title, content,file_path, user, category, tags=None):
         "user": user,             # students, teacher
         "category": category,     # schedule, template, manual, instructions
         "tags": lower_tags if lower_tags else [],
-        "created_at": datetime.utcnow()
+        "created_at": formatted_time
     }
 
     documnet_id = docs_collection.insert_one(document).inserted_id
 
     use_flag = 0
     for tag in lower_tags:
-        if tag in const_tags:
-            use_flag = 1
-            tags_collection.update_one(
-                {'name': tag},
-                {'$push': {'documents': {'_id': documnet_id, 'file_path': file_path}}}
-            )
+        for const_tag in const_tags:
+            if SimilarText.is_similar(const_tag, tag, threshold=70):
+                use_flag = 1
+                tags_collection.update_one(
+                    {'name': const_tag},
+                    {'$push': {'documents': {'_id': documnet_id, 'file_path': file_path}}}
+                )
     if use_flag == 0:
         tags_collection.insert_one({"name": tags[0], "documents": [{'_id': documnet_id, 'file_path': file_path}]})
 
@@ -95,11 +102,14 @@ def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_titl
     from bson import ObjectId
     try:
         doc_id = ObjectId(doc_id)
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        current_time_msk = datetime.now(moscow_tz)
+        formatted_time = current_time_msk.strftime('%Y-%m-%d %H:%M:%S')
         update_data = {
             "file_path": new_file_path,
             "content": new_content,
             "tags": new_tags,
-            "updated_at": datetime.utcnow()
+            "updated_at": formatted_time
         }
         if new_title:
             update_data["title"] = new_title
@@ -143,9 +153,10 @@ def search_by_tag(query):
                 doc = docs_collection.find_one({"_id": doc_id['_id']})
                 doc_tags_set = set(doc['tags'])
                 matches = keyword_set.intersection(doc_tags_set)
-                relevance_scores.append((str(doc_id['_id']), len(matches)))
+                date = datetime.strptime(doc['created_at'], '%Y-%m-%d %H:%M:%S')
+                relevance_scores.append((str(doc_id['_id']), len(matches), date))
 
-    sorted_documents = sorted(relevance_scores, key=lambda x: x[1], reverse=True)
+    sorted_documents = sorted(relevance_scores,  key=lambda x: (x[1], x[2]), reverse=True)
     result = []
     for case in sorted_documents:
         result.append(case[0])
