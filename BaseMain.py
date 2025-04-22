@@ -47,7 +47,7 @@ async def upload_document(file: UploadFile = File(...), tags: Optional[str] = Fo
         tags = CreateTags2.extract_keywords(content)
         tags.append(file.filename)
     else:
-        tags = tags.split(",")
+        tags = tags.split(", ")
     #doc_id = mongoDB.upload_document_to_db(title, content,file_path, user="students", category="manual", tags= tags)
     doc_id = mongoDB.upload_document_to_db(title, content, file_path, user="students", category="manual", tags=tags)
     if not doc_id:
@@ -58,16 +58,7 @@ async def upload_document(file: UploadFile = File(...), tags: Optional[str] = Fo
 @app.get("/search")
 async def search(query: str):
     result = mongoDB.search_by_tag(query)
-    if result == 11:
-        raise HTTPException(status_code=404, detail="Тег не найден")
-    elif result == 22:
-        raise HTTPException(status_code=404, detail="Документ не найден")
-    else:
-        answer = []
-        for docs in result:
-            object_id = docs[1]["_id"]
-            answer.append(str(object_id))
-        return ' '.join(answer)
+    return ' '.join(result)
 
 
 @app.get("/document/{id}")

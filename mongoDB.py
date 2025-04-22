@@ -1,15 +1,19 @@
 from pymongo import MongoClient
 from datetime import datetime
 import CreateTags2
+import pytz
+import SimilarText
 
 client = MongoClient("mongodb://localhost:27017/")
 db = client['database']
 docs_collection = db["documents"]
 tags_collection = db['tags']
 
-const_tags = ['Расписание']
+const_tags = ['Расписание', 'ПИ', 'ПМИ', 'Курсовая работа', '3 курс', 'Заявление']
+const_tags = [tag.lower() for tag in const_tags]
+
 if tags_collection.count_documents({}) == 0:
-    tags_collection.insert_many([{"name": tag, "documents": []} for tag in const_tags])
+    tags_collection.insert_many([{"name": tag.lower(), "documents": []} for tag in const_tags])
 
 
 def upload_document_to_db(title, content,file_path, user, category, tags=None):
@@ -25,27 +29,33 @@ def upload_document_to_db(title, content,file_path, user, category, tags=None):
         print(f"Документ уже существует в базе данных: {title}")
         return None
 
+    lower_tags = [tag.lower() for tag in tags]
+
+    moscow_tz = pytz.timezone('Europe/Moscow')
+    current_time_msk = datetime.now(moscow_tz)
+    formatted_time = current_time_msk.strftime('%Y-%m-%d %H:%M:%S')
+
     document = {
         "title": title,
         "content": content,
         "file_path": file_path,  # Путь к файлу на сервере
         "user": user,             # students, teacher
         "category": category,     # schedule, template, manual, instructions
-        "tags": tags if tags else [],
-        "created_at": datetime.utcnow()
+        "tags": lower_tags if lower_tags else [],
+        "created_at": formatted_time
     }
 
     documnet_id = docs_collection.insert_one(document).inserted_id
-    #print(f"Документ успешно загружен. ID: {documnet_id}")
 
     use_flag = 0
-    for tag in tags:
-        if tag in const_tags:
-            use_flag = 1
-            tags_collection.update_one(
-                {'name': tag},
-                {'$push': {'documents': {'_id': documnet_id, 'file_path': file_path}}}
-            )
+    for tag in lower_tags:
+        for const_tag in const_tags:
+            if SimilarText.is_similar(const_tag, tag, threshold=70):
+                use_flag = 1
+                tags_collection.update_one(
+                    {'name': const_tag},
+                    {'$push': {'documents': {'_id': documnet_id, 'file_path': file_path}}}
+                )
     if use_flag == 0:
         tags_collection.insert_one({"name": tags[0], "documents": [{'_id': documnet_id, 'file_path': file_path}]})
 
@@ -92,11 +102,14 @@ def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_titl
     from bson import ObjectId
     try:
         doc_id = ObjectId(doc_id)
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        current_time_msk = datetime.now(moscow_tz)
+        formatted_time = current_time_msk.strftime('%Y-%m-%d %H:%M:%S')
         update_data = {
             "file_path": new_file_path,
             "content": new_content,
             "tags": new_tags,
-            "updated_at": datetime.utcnow()
+            "updated_at": formatted_time
         }
         if new_title:
             update_data["title"] = new_title
@@ -114,48 +127,37 @@ def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_titl
         print(f"Ошибка: {str(e)}")
         return 0
 
+def get_documents_by_tag(tag_name):
+    tag = tags_collection.find_one({"name": tag_name}, {"documents": 1})
+    if tag:
+        return tag.get("documents", [])
+    else:
+        return None
+
 
 def search_by_tag(query):
 
     query_words = CreateTags2.to_nominative_case(query).split()
-    tags = list(db.tags.find({}))
-    best_tag = None
-    best_count = 0
+    keyword_set = set(query_words)
+    relevance_scores = []
+    seen_ids = set()
 
-    for tag in tags:
-        tag_name = tag['name'].lower()
-        match_count = sum(tag_name.count(word) for word in query_words)
-        if match_count > best_count:
-            best_count = match_count
-            best_tag = tag
+    for word in query_words:
+        word_docs = get_documents_by_tag(word)
+        if word_docs:
+            for doc_id in word_docs:
+                if str(doc_id) not in seen_ids:
+                    seen_ids.add(str(doc_id))
+                else:
+                    continue
+                doc = docs_collection.find_one({"_id": doc_id['_id']})
+                doc_tags_set = set(doc['tags'])
+                matches = keyword_set.intersection(doc_tags_set)
+                date = datetime.strptime(doc['created_at'], '%Y-%m-%d %H:%M:%S')
+                relevance_scores.append((str(doc_id['_id']), len(matches), date))
 
-    if best_tag is None:
-        return 11
-
-    documents = []
-    if "documents" in best_tag:
-        documents.extend(best_tag["documents"])
-
-    scored_documents = []
-
-    for document in documents:
-        score = 0
-        id = document['_id']
-        document = get_document_db(id)
-        document_title = document['title'].lower()
-        document_tags = document['tags']
-        for word in query_words:
-            score += document_title.count(word)
-        for word in query_words:
-            for w_tag in document_tags:
-                if w_tag.lower() == word:
-                    score += 1
-        if score > 0:
-            scored_documents.append((score, document))
-
-    top_documents = sorted(scored_documents, key=lambda x: x[0], reverse=True)[:3]
-
-    if len(top_documents) == 0:
-        return 22
-    else:
-        return top_documents
+    sorted_documents = sorted(relevance_scores,  key=lambda x: (x[1], x[2]), reverse=True)
+    result = []
+    for case in sorted_documents:
+        result.append(case[0])
+    return result
