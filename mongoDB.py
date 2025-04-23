@@ -1,20 +1,32 @@
+# mongoDB.py
 from pymongo import MongoClient
 from datetime import datetime
 import CreateTags2
 import pytz
 import SimilarText
 
+
 client = MongoClient("mongodb://localhost:27017/")
 db = client['database']
 docs_collection = db["documents"]
 tags_collection = db['tags']
 
-const_tags = ['Расписание', 'ПИ', 'ПМИ', 'Курсовая работа', '3 курс', 'Заявление']
+const_tags = ['Экзамены','Сессия','Пересдача','Зачет','Прокторинг','Мероприятия',
+              'Дисциплины','Направления','ОП','Практика','Стажировка','Учебный офис',
+              'Деканат','Военная кафедра','Курсовая работа', 'КР', 'курсач', 'науч рук',
+              'Диплом', 'ВКР', 'Выпускная курсовая работа','Волонтерство','Расписание',
+              'ПМИ','ПИ','Программная инженерия','ПМИ','Прикладная математика и информатика',
+              'БИ','Бизнес информатика','КНТ','Компьютерные науки и технологии','ТИДИ',
+              'Технологии искусственного и дополненного интеллекта','ФМ',
+              'Фундаментальная и прикладная математика', 'Курсовая работа',
+              'Расписание', 'Шаблон', 'Образец', 'Памятка', 'Рекомендации',
+              'Регламент', 'Приказ', 'Положение', 'Инструкция', 'Информационный документ', 'Заявление',
+              '1 курс', '2 курс', '3 курс', '4 курс', 'Бакалавриат', 'Магистратура', '1 модуль',
+              '2 модуль', '3 модуль', '4 модуль']
 const_tags = [tag.lower() for tag in const_tags]
 
 if tags_collection.count_documents({}) == 0:
     tags_collection.insert_many([{"name": tag.lower(), "documents": []} for tag in const_tags])
-
 
 def upload_document_to_db(title, content,file_path, user, category, tags=None):
     duplicate = docs_collection.find_one({
@@ -60,6 +72,7 @@ def upload_document_to_db(title, content,file_path, user, category, tags=None):
         tags_collection.insert_one({"name": tags[0], "documents": [{'_id': documnet_id, 'file_path': file_path}]})
 
     return documnet_id
+
 
 def get_document_db(doc_id):
     from bson import ObjectId

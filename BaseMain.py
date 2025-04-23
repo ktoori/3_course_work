@@ -1,25 +1,22 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
-import nltk
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Query
+from fastapi.responses import JSONResponse
 from starlette.responses import FileResponse
+from typing import List
 import os
+from pathlib import Path
 import ReadFile
 import mongoDB
 import CreateTags2
-from typing import Optional, List, Dict, Any
-from pathlib import Path
+import nltk
 
-nltk.download('punkt_tab')
-
+nltk.download('punkt')
+nltk.download('stopwords')
 app = FastAPI()
 
-# Директория для хранения файлов
 UPLOAD_DIRECTORY = "uploads"
-
-# Создаем директорию для загрузки файлов, если она не существует
 if not os.path.exists(UPLOAD_DIRECTORY):
     os.makedirs(UPLOAD_DIRECTORY)
 
-# Функция для сохранения файла на сервере
 def save_file_to_server(file: UploadFile) -> str:
     file_name = Path(file.filename).name
     file_location = os.path.join(UPLOAD_DIRECTORY, file_name)
@@ -30,15 +27,101 @@ def save_file_to_server(file: UploadFile) -> str:
     print(f"[DEBUG] Файл сохранен: {file_location} ({len(content)} байт)")
     return file_location
 
-@app.post("/upload")
+
+@app.post("/generate_tags")
+async def document_tags(file: UploadFile = File(...)):
+    """Анализирует документ и возвращает список тегов"""
+    try:
+        content = ""
+        if file.filename.endswith('.pdf'):
+            content = await ReadFile.extract_pdf_text(file.file)
+        elif file.filename.endswith('.docx'):
+            content = await ReadFile.extract_docx_text(file.file)
+        elif file.filename.endswith('.xlsx'):
+            content = await ReadFile.extract_xlsx_text(file.file)
+
+        content = ReadFile.clean_text(content) if content else ""
+        auto_tags = CreateTags2.extract_keywords(content)
+
+        return JSONResponse({
+            "filename": file.filename,
+            "content_length": len(content),
+            "auto_tags": auto_tags,
+            "const_tags": mongoDB.const_tags
+        })
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/upload", response_model=dict)
+async def upload_document(
+    file: UploadFile = File(...),
+    selected_tags: List[str] = Query(
+        mongoDB.const_tags,
+        description="Выберите теги из списка "
+    ),
+    use_auto_tags: bool = Form(
+        True,
+        description="Добавить автоматически сгенерированные теги"
+    ),
+    user: str = Form("student"),
+    category: str = Form("manual")
+):
+    """Загрузить документ с выбранными тегами"""
+    content = ""
+    if file.filename.endswith('.pdf'):
+        content = await ReadFile.extract_pdf_text(file.file)
+    elif file.filename.endswith('.docx'):
+        content = await ReadFile.extract_docx_text(file.file)
+    elif file.filename.endswith('.xlsx'):
+        content = await ReadFile.extract_xlsx_text(file.file)
+
+    content = ReadFile.clean_text(content) if content else ""
+    file_path = save_file_to_server(file)
+    # Определяем итоговые теги
+    final_tags = []
+
+    # Добавляем выбранные теги
+    if selected_tags:
+        final_tags.extend(tag.strip() for tag in selected_tags if tag.strip())
+
+    # Добавляем автоматические теги (если включено)
+    if use_auto_tags:
+        auto_tags = CreateTags2.extract_keywords(content)
+        final_tags.extend(tag for tag in auto_tags if tag not in final_tags)
+
+    # Если нет тегов - используем имя файла
+    if not final_tags:
+        final_tags.append(Path(file.filename).stem.lower())
+
+    # Удаляем дубликаты
+    final_tags = list(set(final_tags))
+
+    # Сохраняем в БД (моделируем вызов)
+    doc_id = mongoDB.upload_document_to_db(file.filename, content, file_path, user=user, category= category,
+                                           tags=final_tags)
+    if not doc_id:
+        raise HTTPException(status_code=400, detail="Документ уже существует в базе данных")
+    return {
+        "status": "success",
+        "document_id": str(doc_id),
+        "filename": file.filename,
+        "selected_tags": selected_tags,
+        "auto_tags_used": use_auto_tags,
+        "final_tags": final_tags
+    }
+
+
+
+'''@app.post("/upload")
 async def upload_document(file: UploadFile = File(...), tags: Optional[str] = Form(None)):
     content = ""
     if file.filename.endswith('.pdf'):
-        content = ReadFile.extract_pdf_text(file.file)
+        content = await ReadFile.extract_pdf_text(file.file)
     elif file.filename.endswith('.docx'):
-        content = ReadFile.extract_docx_text(file.file)
+        content = await ReadFile.extract_docx_text(file.file)
     elif file.filename.endswith('.xlsx'):
-        content = ReadFile.extract_xlsx_text(file.file)
+        content = await ReadFile.extract_xlsx_text(file.file)
 
     content = ReadFile.clean_text(content) if content else ""
     file_path = save_file_to_server(file)
@@ -53,7 +136,8 @@ async def upload_document(file: UploadFile = File(...), tags: Optional[str] = Fo
     if not doc_id:
         raise HTTPException(status_code=400, detail="Документ уже существует в базе данных")
 
-    return {"message": "Документ успешно загружен", "file_id": str(doc_id)}
+    return {"message": "Документ успешно загружен", "file_id": str(doc_id)}'''
+
 
 @app.get("/search")
 async def search(query: str):
