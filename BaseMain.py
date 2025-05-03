@@ -46,8 +46,7 @@ async def document_tags(file: UploadFile = File(...)):
         return JSONResponse({
             "filename": file.filename,
             "content_length": len(content),
-            "auto_tags": auto_tags,
-            "const_tags": mongoDB.const_tags
+            "auto_tags": auto_tags
         })
 
     except Exception as e:
@@ -56,8 +55,21 @@ async def document_tags(file: UploadFile = File(...)):
 @app.post("/upload", response_model=dict)
 async def upload_document(
     file: UploadFile = File(...),
-    selected_tags: List[str] = Query(
-        mongoDB.const_tags,
+
+    content_tags: List[str] = Query(
+        mongoDB.content_tags,
+        description="Выберите теги из списка "
+    ),
+    program_track_tags: List[str] = Query(
+        mongoDB.program_track_tags,
+        description="Выберите теги из списка "
+    ),
+    doc_type_tags: List[str] = Query(
+        mongoDB.doc_type_tags,
+        description="Выберите теги из списка "
+    ),
+    other_tags: List[str] = Query(
+        mongoDB.other_tags,
         description="Выберите теги из списка "
     ),
     use_auto_tags: bool = Form(
@@ -82,9 +94,15 @@ async def upload_document(
     final_tags = []
 
     # Добавляем выбранные теги
-    if selected_tags:
-        final_tags.extend(tag.strip() for tag in selected_tags if tag.strip())
-
+    if content_tags:
+        final_tags.extend(tag.strip() for tag in content_tags if tag.strip())
+    if program_track_tags:
+        final_tags.extend(tag.strip() for tag in program_track_tags if tag.strip())
+    if doc_type_tags:
+        final_tags.extend(tag.strip() for tag in doc_type_tags if tag.strip())
+    if other_tags:
+        final_tags.extend(tag.strip() for tag in other_tags if tag.strip())
+    selected_tags= [final_tags]
     # Добавляем автоматические теги (если включено)
     if use_auto_tags:
         auto_tags = CreateTags2.extract_keywords(content)
