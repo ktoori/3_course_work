@@ -8,6 +8,7 @@ import ReadFile
 import mongoDB
 import CreateTags2
 import nltk
+import Dictionaries
 
 nltk.download('punkt')
 nltk.download('stopwords')
@@ -57,19 +58,19 @@ async def upload_document(
     file: UploadFile = File(...),
 
     content_tags: List[str] = Query(
-        mongoDB.content_tags,
+        Dictionaries.content_tags,
         description="Выберите теги из списка"
     ),
     program_track_tags: List[str] = Query(
-        mongoDB.program_track_tags,
+        Dictionaries.program_track_tags,
         description="Выберите теги из списка"
     ),
     doc_type_tags: List[str] = Query(
-        mongoDB.doc_type_tags,
+        Dictionaries.doc_type_tags,
         description="Выберите теги из списка"
     ),
     other_tags: List[str] = Query(
-        mongoDB.other_tags,
+        Dictionaries.other_tags,
         description="Выберите теги из списка"
     ),
     use_auto_tags: bool = Form(
