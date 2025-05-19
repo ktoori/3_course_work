@@ -4,27 +4,20 @@ from datetime import datetime
 import CreateTags2
 import pytz
 import SimilarText
-
+import Dictionaries
 
 client = MongoClient("mongodb://localhost:27017/")
 db = client['database']
 docs_collection = db["documents"]
 tags_collection = db['tags']
 
-content_tags =['Экзамены','Сессия','Пересдача','Зачет','Прокторинг','Мероприятия',
-              'Дисциплины','Направления','ОП','Практика','Стажировка','Учебный офис',
-              'Деканат','Военная кафедра','Курсовая работа', 'КР', 'курсач', 'науч рук',
-              'Диплом', 'ВКР', 'Выпускная курсовая работа','Волонтерство', 'Майнор', 'СОП','ПУД']
-program_track_tags=['ПМИ','ПИ','Программная инженерия','ПМИ','Прикладная математика и информатика',
-              'БИ','Бизнес информатика','КНТ','Компьютерные науки и технологии','ТИДИ',
-              'Технологии искусственного и дополненного интеллекта','ФМ',
-              'Фундаментальная и прикладная математика']
-doc_type_tags=['Расписание', 'Шаблон', 'Образец', 'Памятка', 'Рекомендации',
-              'Регламент', 'Приказ', 'Положение', 'Инструкция', 'Информационный документ', 'Заявление']
-other_tags=['1 курс', '2 курс', '3 курс', '4 курс', 'Бакалавриат', 'Магистратура', '1 модуль',
-              '2 модуль', '3 модуль', '4 модуль']
-const_tags = content_tags+program_track_tags+doc_type_tags+other_tags
-const_tags = [tag.lower() for tag in const_tags]
+association_set = set()
+for dic in (Dictionaries.content_tags_dict, Dictionaries.program_tags_dict, Dictionaries.doc_type_dict):
+    association_set.update(dic.keys())
+    for values in dic.values():
+        association_set.update(values)
+
+const_tags = list(Dictionaries.content_tags_dict.keys()) + list(Dictionaries.program_tags_dict.keys()) + list(Dictionaries.doc_type_dict.keys())
 
 if tags_collection.count_documents({}) == 0:
     tags_collection.insert_many([{"name": tag.lower(), "documents": []} for tag in const_tags])
@@ -58,21 +51,26 @@ def upload_document_to_db(title, content,file_path, user, category, tags=None):
         "created_at": formatted_time
     }
 
-    documnet_id = docs_collection.insert_one(document).inserted_id
+    document_id = docs_collection.insert_one(document).inserted_id
 
     use_flag = 0
     for tag in lower_tags:
-        for const_tag in const_tags:
-            if SimilarText.is_similar(const_tag, tag, threshold=70):
-                use_flag = 1
-                tags_collection.update_one(
-                    {'name': const_tag},
-                    {'$push': {'documents': {'_id': documnet_id, 'file_path': file_path}}}
-                )
+        if tag in association_set:
+            use_flag = 1
+            for const_tag, related_tags in Dictionaries.tag_associations.items():
+                if any(SimilarText.is_similar(rt.lower(), tag, threshold=100) for rt in related_tags):
+                    tags_collection.update_one(
+                        {'name': const_tag},
+                        {'$push': {'documents': {'_id': document_id, 'file_path': file_path}}}
+                    )
+                    docs_collection.update_one(
+                        {"_id": document_id},
+                        {"$addToSet": {"tags": const_tag}}
+                    )
     if use_flag == 0:
-        tags_collection.insert_one({"name": tags[0], "documents": [{'_id': documnet_id, 'file_path': file_path}]})
+        tags_collection.insert_one({"name": tags[0], "documents": [{'_id': document_id, 'file_path': file_path}]})
 
-    return documnet_id
+    return document_id
 
 
 def get_document_db(doc_id):
@@ -94,6 +92,7 @@ def delete_document_db(doc_id):
     try:
         doc_id = ObjectId(doc_id)
         document = docs_collection.find_one({"_id": doc_id})
+        tags = []
         if document:
             tags = document.get("tags")
         result = docs_collection.delete_one({"_id": doc_id})

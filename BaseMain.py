@@ -58,19 +58,19 @@ async def upload_document(
 
     content_tags: List[str] = Query(
         mongoDB.content_tags,
-        description="Выберите теги из списка "
+        description="Выберите теги из списка"
     ),
     program_track_tags: List[str] = Query(
         mongoDB.program_track_tags,
-        description="Выберите теги из списка "
+        description="Выберите теги из списка"
     ),
     doc_type_tags: List[str] = Query(
         mongoDB.doc_type_tags,
-        description="Выберите теги из списка "
+        description="Выберите теги из списка"
     ),
     other_tags: List[str] = Query(
         mongoDB.other_tags,
-        description="Выберите теги из списка "
+        description="Выберите теги из списка"
     ),
     use_auto_tags: bool = Form(
         True,
