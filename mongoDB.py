@@ -22,7 +22,7 @@ const_tags = list(Dictionaries.content_tags_dict.keys()) + list(Dictionaries.pro
 if tags_collection.count_documents({}) == 0:
     tags_collection.insert_many([{"name": tag.lower(), "documents": []} for tag in const_tags])
 
-def upload_document_to_db(title, content,file_path, user, category, tags=None):
+def upload_document_to_db(title, content,file_path, user, tags=None):
     duplicate = docs_collection.find_one({
         "$or": [
             {"title": title},
@@ -46,7 +46,6 @@ def upload_document_to_db(title, content,file_path, user, category, tags=None):
         "content": content,
         "file_path": file_path,  # Путь к файлу на сервере
         "user": user,             # students, teacher
-        "category": category,     # schedule, template, manual, instructions
         "tags": lower_tags if lower_tags else [],
         "created_at": formatted_time
     }
@@ -111,7 +110,7 @@ def delete_document_db(doc_id):
         print(f"Ошибка: {str(e)}")
         return 0
 
-def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_title=None, new_category=None):
+def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_title=None):
     from bson import ObjectId
     try:
         doc_id = ObjectId(doc_id)
@@ -126,8 +125,6 @@ def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_titl
         }
         if new_title:
             update_data["title"] = new_title
-        if new_category:
-            update_data["category"] = new_category
         if new_tags:
             update_data["tags"] = new_tags
         result = docs_collection.update_one({"_id": doc_id}, {"$set": update_data})
@@ -156,18 +153,22 @@ def search_by_tag(query):
     seen_ids = set()
 
     for word in query_words:
-        word_docs = get_documents_by_tag(word)
-        if word_docs:
-            for doc_id in word_docs:
-                if str(doc_id) not in seen_ids:
-                    seen_ids.add(str(doc_id))
-                else:
-                    continue
-                doc = docs_collection.find_one({"_id": doc_id['_id']})
-                doc_tags_set = set(doc['tags'])
-                matches = keyword_set.intersection(doc_tags_set)
-                date = datetime.strptime(doc['created_at'], '%Y-%m-%d %H:%M:%S')
-                relevance_scores.append((str(doc_id['_id']), len(matches), date))
+        for key, values in Dictionaries.tag_associations.items():
+            if word in values:
+                word_docs = get_documents_by_tag(key)
+                if word_docs:
+                    for doc_id in word_docs:
+                        if str(doc_id) not in seen_ids:
+                            seen_ids.add(str(doc_id))
+                            doc = docs_collection.find_one({"_id": doc_id['_id']})
+                            doc_tags_set = set(doc['tags'])
+                            matches = keyword_set.intersection(doc_tags_set)
+                            date = datetime.strptime(doc['created_at'], '%Y-%m-%d %H:%M:%S')
+                            if matches:
+                                relevance_scores.append((str(doc_id['_id']), len(matches), date))
+                                if len(relevance_scores) > 20:
+                                    relevance_scores.sort(key=lambda x: (x[1], x[2]))
+                                    relevance_scores.pop(0)
 
     sorted_documents = sorted(relevance_scores,  key=lambda x: (x[1], x[2]), reverse=True)
     result = []

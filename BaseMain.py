@@ -78,7 +78,6 @@ async def upload_document(
         description="Добавить автоматически сгенерированные теги"
     ),
     user: str = Form("student"),
-    category: str = Form("manual")
 ):
     """Загрузить документ с выбранными тегами"""
     content = ""
@@ -117,7 +116,7 @@ async def upload_document(
     final_tags = list(set(final_tags))
 
     # Сохраняем в БД (моделируем вызов)
-    doc_id = mongoDB.upload_document_to_db(file.filename, content, file_path, user=user, category= category,
+    doc_id = mongoDB.upload_document_to_db(file.filename, content, file_path, user=user,
                                            tags=final_tags)
     if not doc_id:
         raise HTTPException(status_code=400, detail="Документ уже существует в базе данных")
@@ -131,40 +130,13 @@ async def upload_document(
     }
 
 
-
-'''@app.post("/upload")
-async def upload_document(file: UploadFile = File(...), tags: Optional[str] = Form(None)):
-    content = ""
-    if file.filename.endswith('.pdf'):
-        content = await ReadFile.extract_pdf_text(file.file)
-    elif file.filename.endswith('.docx'):
-        content = await ReadFile.extract_docx_text(file.file)
-    elif file.filename.endswith('.xlsx'):
-        content = await ReadFile.extract_xlsx_text(file.file)
-
-    content = ReadFile.clean_text(content) if content else ""
-    file_path = save_file_to_server(file)
-    title = file.filename
-    if not tags:
-        tags = CreateTags2.extract_keywords(content)
-        tags.append(file.filename)
-    else:
-        tags = tags.split(", ")
-    #doc_id = mongoDB.upload_document_to_db(title, content,file_path, user="students", category="manual", tags= tags)
-    doc_id = mongoDB.upload_document_to_db(title, content, file_path, user="students", category="manual", tags=tags)
-    if not doc_id:
-        raise HTTPException(status_code=400, detail="Документ уже существует в базе данных")
-
-    return {"message": "Документ успешно загружен", "file_id": str(doc_id)}'''
-
-
 @app.get("/search")
 async def search(query: str):
     result = mongoDB.search_by_tag(query)
     return ' '.join(result)
 
 
-@app.get("/document/{id}")
+@app.get("/get_document")
 async def get_document(file_id: str):
     doc = mongoDB.get_document_db(file_id)
     if doc:
@@ -172,15 +144,15 @@ async def get_document(file_id: str):
     else:
         raise HTTPException(status_code=404, detail="Документ не найден")
 
-@app.get("/download/{doc_id}")        #через swagger работает
-async def download_document(doc_id: str):
-    document = mongoDB.get_document_db(doc_id)
+@app.get("/download_document")        #через swagger работает
+async def download_document(file_id: str):
+    document = mongoDB.get_document_db(file_id)
     if document and os.path.exists(document['file_path']):
         return FileResponse(document['file_path'], filename=document['title'])
     else:
         raise HTTPException(status_code=404, detail="Файл не найден")
 
-@app.delete("/document/{id}")
+@app.delete("/delete_document")
 async def delete_document(file_id: str):
     document = mongoDB.get_document_db(file_id)
     if document:
@@ -197,7 +169,7 @@ async def delete_document(file_id: str):
         raise HTTPException(status_code=404, detail="Документ не найден")
 
 
-@app.put("/update/{id}")
+@app.put("/update_document")
 async def update_document(file_id: str, file: UploadFile):
     document = mongoDB.get_document_db(file_id)
     if document:
