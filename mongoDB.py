@@ -1,7 +1,7 @@
 # mongoDB.py
 from pymongo import MongoClient
 from datetime import datetime
-import CreateTags2
+import CreateTags
 import pytz
 import SimilarText
 import Dictionaries
@@ -9,6 +9,7 @@ import Dictionaries
 client = MongoClient("mongodb://localhost:27017/")
 db = client['database']
 docs_collection = db["documents"]
+
 tags_collection = db['tags']
 
 association_set = set()
@@ -147,7 +148,7 @@ def get_documents_by_tag(tag_name):
 
 def search_by_tag(query):
 
-    query_words = CreateTags2.to_nominative_case(query).split()
+    query_words = CreateTags.to_nominative_case(query).split()
     keyword_set = set(query_words)
     relevance_scores = []
     seen_ids = set()

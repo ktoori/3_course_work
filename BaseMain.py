@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import ReadFile
 import mongoDB
-import CreateTags2
+import CreateTags
 import nltk
 import Dictionaries
 
@@ -42,7 +42,7 @@ async def document_tags(file: UploadFile = File(...)):
             content = await ReadFile.extract_xlsx_text(file.file)
 
         content = ReadFile.clean_text(content) if content else ""
-        auto_tags = CreateTags2.extract_keywords(content)
+        auto_tags = CreateTags.extract_keywords(content)
 
         return JSONResponse({
             "filename": file.filename,
@@ -105,7 +105,7 @@ async def upload_document(
     selected_tags= [final_tags]
     # Добавляем автоматические теги (если включено)
     if use_auto_tags:
-        auto_tags = CreateTags2.extract_keywords(content)
+        auto_tags = CreateTags.extract_keywords(content)
         final_tags.extend(tag for tag in auto_tags if tag not in final_tags)
 
     # Если нет тегов - используем имя файла
@@ -180,7 +180,7 @@ async def update_document(file_id: str, file: UploadFile):
             content = ReadFile.extract_docx_text(file.file)
         elif file.filename.endswith('.xlsx'):
             content = ReadFile.extract_xlsx_text(file.file)
-        tags = CreateTags2.extract_keywords(content)
+        tags = CreateTags.extract_keywords(content)
         # Удаляем старый файл с сервера
         if os.path.exists(document['file_path']):
             os.remove(document['file_path'])

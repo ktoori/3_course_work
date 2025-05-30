@@ -45,30 +45,3 @@ async def extract_content(file: UploadFile) -> str:
     elif file.filename.endswith('.xlsx'):
         return await extract_xlsx_text(file)
     raise ValueError("Unsupported file format")
-
-
-'''async def extract_pdf_text(file):
-    reader = PyPDF2.PdfReader(file)
-    number_of_pages = len(reader.pages)
-    text = ""
-    for page in range(number_of_pages):
-        text += reader.pages[page].extract_text()
-    return clean_text(text)
-
-async def extract_docx_text(file):
-    doc = Document(file)
-    text = ""
-    for paragraph in doc.paragraphs:
-        text += paragraph.text
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                text += cell.text
-    return clean_text(text)
-
-async def extract_xlsx_text(file):
-    df = pd.read_excel(file)
-    text = ""
-    for index, row in df.iterrows():
-        text += " ".join(str(cell) for cell in row) + "\n"
-    return clean_text(text)'''
