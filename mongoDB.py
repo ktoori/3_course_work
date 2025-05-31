@@ -5,12 +5,30 @@ import CreateTags
 import pytz
 import SimilarText
 import Dictionaries
+from fastapi import HTTPException
 
 client = MongoClient("mongodb://localhost:27017/")
 db = client['database']
-docs_collection = db["documents"]
 
+docs_collection = db["documents"]
 tags_collection = db['tags']
+config_collection = db['config']
+
+def load_or_init_config():
+    config = config_collection.find_one({'_id': 'global_config'})
+    if not config:
+        config = {
+            '_id': 'global_config',
+            'global_tag_limit': Dictionaries.global_tag_limit,
+            'other_tags': Dictionaries.other_tags,
+            'content_tags_dict': Dictionaries.content_tags_dict,
+            'program_tags_dict': Dictionaries.program_tags_dict,
+            'doc_type_dict': Dictionaries.doc_type_dict
+        }
+        config_collection.insert_one(config)
+    return config
+
+config = load_or_init_config()
 
 association_set = set()
 for dic in (Dictionaries.content_tags_dict, Dictionaries.program_tags_dict, Dictionaries.doc_type_dict):
@@ -182,4 +200,54 @@ def search_by_tag(query):
         result.append((case[0], case[2].strftime("%d.%m.%Y %H:%M")))
     return result
 
-print(search_by_tag("пми"))
+def get_config():
+    config = config_collection.find_one({'_id': 'global_config'})
+    if not config:
+        raise HTTPException(status_code=500, detail="Config not found in DB")
+    return config
+
+def update_config_field(field_name, value):
+    config_collection.update_one({'_id': 'global_config'}, {'$set': {field_name: value}})
+
+def get_dict_by_name(dict_name):
+    config = get_config()
+    if dict_name == "other_tags":
+        return config.get('other_tags', [])
+    elif dict_name == "content_tags_dict":
+        return config.get('content_tags_dict', {})
+    elif dict_name == "program_tags_dict":
+        return config.get('program_tags_dict', {})
+    elif dict_name == "doc_type_dict":
+        return config.get('doc_type_dict', {})
+    else:
+        raise HTTPException(status_code=400, detail="Unknown dictionary name")
+
+def set_dict_by_name(dict_name, new_value):
+    if dict_name == "other_tags":
+        update_config_field('other_tags', new_value)
+    elif dict_name == "content_tags_dict":
+        update_config_field('content_tags_dict', new_value)
+    elif dict_name == "program_tags_dict":
+        update_config_field('program_tags_dict', new_value)
+    elif dict_name == "doc_type_dict":
+        update_config_field('doc_type_dict', new_value)
+    else:
+        raise HTTPException(status_code=400, detail="Unknown dictionary name")
+
+def get_global_tag_limit():
+    config = get_config()
+    return config.get('global_tag_limit')
+
+def set_global_tag_limit(limit):
+    update_config_field('global_tag_limit', limit)
+
+def get_total_tag_count():
+    config = get_config()
+    total = 0
+    # Считаем все теги из словарей и из other_tags
+    for dname in ['content_tags_dict', 'program_tags_dict', 'doc_type_dict']:
+        d = config.get(dname, {})
+        total += len(d)
+    other = config.get('other_tags', [])
+    total += len(other)
+    return total

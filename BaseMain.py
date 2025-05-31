@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Query
 from fastapi.responses import JSONResponse
 from starlette.responses import FileResponse
-from typing import List
+from typing import List, Literal
 import os
 from pathlib import Path
 import ReadFile
@@ -58,15 +58,15 @@ async def upload_document(
     file: UploadFile = File(...),
 
     content_tags: List[str] = Query(
-        Dictionaries.content_tags,
+        list(Dictionaries.content_tags_dict.keys()),
         description="Выберите теги из списка"
     ),
     program_track_tags: List[str] = Query(
-        Dictionaries.program_track_tags,
+        list(Dictionaries.program_tags_dict.keys()),
         description="Выберите теги из списка"
     ),
     doc_type_tags: List[str] = Query(
-        Dictionaries.doc_type_tags,
+        list(Dictionaries.doc_type_dict.keys()),
         description="Выберите теги из списка"
     ),
     other_tags: List[str] = Query(
@@ -196,6 +196,86 @@ async def update_document(file_id: str, file: UploadFile):
             raise HTTPException(status_code=404, detail="Документ не найден")
     else:
         raise HTTPException(status_code=404, detail="Документ не найден")
+
+
+@app.post("/add_tag", summary="Добавить тег с ассоциациями")
+def add_tag(
+        dict_name: Literal["other_tags", "content_tags_dict", "program_tags_dict", "doc_type_dict"] = Query(...),
+        tag: str = Query(...),
+        associations: str = Query("")):
+    if dict_name == "other_tags":
+        other_tags = mongoDB.get_dict_by_name("other_tags")
+        if tag not in other_tags:
+            # Проверяем лимит
+            total_tags = mongoDB.get_total_tag_count()
+            limit = mongoDB.get_global_tag_limit()
+            if limit is not None and total_tags >= limit:
+                raise HTTPException(status_code=400, detail="Global tag limit exceeded")
+            other_tags.append(tag)
+            mongoDB.set_dict_by_name("other_tags", other_tags)
+            return {"message": "Tag added to other_tags", "data": other_tags}
+        else:
+            return {"message": "Tag already exists in other_tags", "data": other_tags}
+
+    tag_dict = mongoDB.get_dict_by_name(dict_name)
+    if not isinstance(tag_dict, dict):
+        raise HTTPException(status_code=400, detail="Target dictionary is not a dict")
+
+    total_tags = mongoDB.get_total_tag_count()
+    limit = mongoDB.get_global_tag_limit()
+    is_new = tag not in tag_dict
+    if limit is not None and total_tags >= limit and is_new:
+        raise HTTPException(status_code=400, detail="Global tag limit exceeded")
+
+    assoc_list = associations.split() if associations else []
+
+    if tag in tag_dict:
+        for v in assoc_list:
+            if v not in tag_dict[tag]:
+                tag_dict[tag].append(v)
+    else:
+        tag_dict[tag] = assoc_list
+
+    mongoDB.set_dict_by_name(dict_name, tag_dict)
+    return {"message": "Tag added successfully", "data": tag_dict}
+
+
+@app.delete("/delete_tags")
+def delete_tags(
+        dict_name: Literal["other_tags", "content_tags_dict", "program_tags_dict", "doc_type_dict"] = Query(...),
+        tags: str = Query(...)):
+    tag_dict = mongoDB.get_dict_by_name(dict_name)
+    tags_to_delete = tags.split()
+
+    if isinstance(tag_dict, dict):
+        for tag in tags_to_delete:
+            tag_dict.pop(tag, None)
+        mongoDB.set_dict_by_name(dict_name, tag_dict)
+        return {"message": "Tags deleted successfully", "data": tag_dict}
+    elif isinstance(tag_dict, list):
+        tag_dict = [t for t in tag_dict if t not in tags_to_delete]
+        mongoDB.set_dict_by_name(dict_name, tag_dict)
+        return {"message": "Tags deleted successfully", "data": tag_dict}
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported tag storage type")
+
+
+@app.get("/get_tags")
+def get_tags():
+    config = mongoDB.get_config()
+    return {
+        "content_tags": config.get("content_tags_dict", {}),
+        "program_tags": config.get("program_tags_dict", {}),
+        "doc_type": config.get("doc_type_dict", {}),
+        "other_tags": config.get("other_tags", []),
+        "global_tag_limit": config.get("global_tag_limit")
+    }
+
+
+@app.post("/set_limit", summary="Установить глобальный лимит на количество тегов")
+def set_limit(limit: int):
+    mongoDB.set_global_tag_limit(limit)
+    return {"message": "Global limit updated", "limit": limit}
 
 if __name__ == '__main__':
     import uvicorn
