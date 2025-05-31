@@ -55,7 +55,8 @@ def to_nominative_case(phrase):
         word_norm = morph.parse(word)[0].inflect({'sing', 'nomn'})
         if word_norm:
             nominative_words.append(word_norm.word)
-
+        else:
+            nominative_words.append(word)
     return ' '.join(nominative_words)
 
 def extract_keywords(text, num_keywords=5):

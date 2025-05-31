@@ -61,7 +61,7 @@ def upload_document_to_db(title, content,file_path, user, tags=None):
                 if any(SimilarText.is_similar(rt.lower(), tag, threshold=100) for rt in related_tags):
                     tags_collection.update_one(
                         {'name': const_tag},
-                        {'$push': {'documents': {'_id': document_id, 'file_path': file_path}}}
+                        {'$addToSet': {'documents': {'_id': document_id, 'file_path': file_path}}}
                     )
                     docs_collection.update_one(
                         {"_id": document_id},
@@ -150,29 +150,36 @@ def search_by_tag(query):
 
     query_words = CreateTags.to_nominative_case(query).split()
     keyword_set = set(query_words)
-    relevance_scores = []
-    seen_ids = set()
 
+    matched_keys = set()
     for word in query_words:
         for key, values in Dictionaries.tag_associations.items():
             if word in values:
-                word_docs = get_documents_by_tag(key)
-                if word_docs:
-                    for doc_id in word_docs:
-                        if str(doc_id) not in seen_ids:
-                            seen_ids.add(str(doc_id))
-                            doc = docs_collection.find_one({"_id": doc_id['_id']})
-                            doc_tags_set = set(doc['tags'])
-                            matches = keyword_set.intersection(doc_tags_set)
-                            date = datetime.strptime(doc['created_at'], '%Y-%m-%d %H:%M:%S')
-                            if matches:
-                                relevance_scores.append((str(doc_id['_id']), len(matches), date))
-                                if len(relevance_scores) > 20:
-                                    relevance_scores.sort(key=lambda x: (x[1], x[2]))
-                                    relevance_scores.pop(0)
+                matched_keys.add(key)
+
+    relevance_scores = []
+    seen_ids = set()
+
+    for key in matched_keys:
+        word_docs = get_documents_by_tag(key)
+        if word_docs:
+            for doc_id in word_docs:
+                if str(doc_id['_id']) not in seen_ids:
+                    seen_ids.add(str(doc_id['_id']))
+                    doc = docs_collection.find_one({"_id": doc_id['_id']})
+                    doc_tags_set = set(doc['tags'])
+                    matches = keyword_set.intersection(doc_tags_set)
+                    date = datetime.strptime(doc['created_at'], '%Y-%m-%d %H:%M:%S')
+                    if matches:
+                        relevance_scores.append((str(doc_id['_id']), len(matches), date))
+                        if len(relevance_scores) > 20:
+                            relevance_scores.sort(key=lambda x: (x[1], x[2]))
+                            relevance_scores.pop(0)
 
     sorted_documents = sorted(relevance_scores,  key=lambda x: (x[1], x[2]), reverse=True)
     result = []
     for case in sorted_documents:
-        result.append(case[0])
+        result.append((case[0], case[2].strftime("%d.%m.%Y %H:%M")))
     return result
+
+print(search_by_tag("пми"))
