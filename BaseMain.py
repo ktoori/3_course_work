@@ -8,7 +8,7 @@ import ReadFile
 import mongoDB
 import CreateTags
 import nltk
-import Dictionaries
+
 
 nltk.download('punkt')
 nltk.download('stopwords')
@@ -58,19 +58,19 @@ async def upload_document(
     file: UploadFile = File(...),
 
     content_tags: List[str] = Query(
-        list(Dictionaries.content_tags_dict.keys()),
+        list(mongoDB.get_dict_by_name("content_tags_dict").keys()),
         description="Выберите теги из списка"
     ),
     program_track_tags: List[str] = Query(
-        list(Dictionaries.program_tags_dict.keys()),
+        list(mongoDB.get_dict_by_name("program_tags_dict").keys()),
         description="Выберите теги из списка"
     ),
     doc_type_tags: List[str] = Query(
-        list(Dictionaries.doc_type_dict.keys()),
+        list(mongoDB.get_dict_by_name("doc_type_dict").keys()),
         description="Выберите теги из списка"
     ),
     other_tags: List[str] = Query(
-        Dictionaries.other_tags,
+        mongoDB.get_dict_by_name("other_tags"),
         description="Выберите теги из списка"
     ),
     use_auto_tags: bool = Form(
@@ -213,7 +213,8 @@ def add_tag(
                 raise HTTPException(status_code=400, detail="Global tag limit exceeded")
             other_tags.append(tag)
             mongoDB.set_dict_by_name("other_tags", other_tags)
-            return {"message": "Tag added to other_tags", "data": other_tags}
+            result = mongoDB.sync_tags_collection()
+            return {"message": "Tag added to other_tags", "data": other_tags, "r": result}
         else:
             return {"message": "Tag already exists in other_tags", "data": other_tags}
 
@@ -237,7 +238,8 @@ def add_tag(
         tag_dict[tag] = assoc_list
 
     mongoDB.set_dict_by_name(dict_name, tag_dict)
-    return {"message": "Tag added successfully", "data": tag_dict}
+    result = mongoDB.sync_tags_collection()
+    return {"message": "Tag added successfully", "data": tag_dict, "r": result}
 
 
 @app.delete("/delete_tags")

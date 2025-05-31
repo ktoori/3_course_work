@@ -30,13 +30,96 @@ def load_or_init_config():
 
 config = load_or_init_config()
 
+def get_config():
+    config = config_collection.find_one({'_id': 'global_config'})
+    if not config:
+        raise HTTPException(status_code=500, detail="Config not found in DB")
+    return config
+
+def sync_tags_collection():
+    config = get_config()
+    current_tags = set(
+        list(config.get("content_tags_dict", {}).keys()) +
+        list(config.get("program_tags_dict", {}).keys()) +
+        list(config.get("doc_type_dict", {}).keys())
+    )
+
+    # Получаем теги из коллекции
+    existing_tags_cursor = tags_collection.find({}, {"name": 1, "_id": 0})
+    existing_tags = set(doc["name"] for doc in existing_tags_cursor)
+
+    # Теги для добавления
+    tags_to_add = current_tags - existing_tags
+    # Теги для удаления
+    tags_to_remove = existing_tags - current_tags
+
+    if tags_to_add:
+        for tag in tags_to_add:
+            tags_collection.update_one(
+                {"name": tag.lower()},
+                {"$setOnInsert": {"documents": []}},
+                upsert=True)
+
+    if tags_to_remove:
+        tags_collection.delete_many({"name": {"$in": list(tags_to_remove)}})
+    return {
+        "tags_added": list(tags_to_add),
+        "tags_removed": list(tags_to_remove)
+    }
+
+def update_config_field(field_name, value):
+    config_collection.update_one({'_id': 'global_config'}, {'$set': {field_name: value}})
+
+def get_dict_by_name(dict_name):
+    config = get_config()
+    if dict_name == "other_tags":
+        return config.get('other_tags', [])
+    elif dict_name == "content_tags_dict":
+        return config.get('content_tags_dict', {})
+    elif dict_name == "program_tags_dict":
+        return config.get('program_tags_dict', {})
+    elif dict_name == "doc_type_dict":
+        return config.get('doc_type_dict', {})
+    else:
+        raise HTTPException(status_code=400, detail="Unknown dictionary name")
+
+def set_dict_by_name(dict_name, new_value):
+    if dict_name == "other_tags":
+        update_config_field('other_tags', new_value)
+    elif dict_name == "content_tags_dict":
+        update_config_field('content_tags_dict', new_value)
+    elif dict_name == "program_tags_dict":
+        update_config_field('program_tags_dict', new_value)
+    elif dict_name == "doc_type_dict":
+        update_config_field('doc_type_dict', new_value)
+    else:
+        raise HTTPException(status_code=400, detail="Unknown dictionary name")
+
+def get_global_tag_limit():
+    config = get_config()
+    return config.get('global_tag_limit')
+
+def set_global_tag_limit(limit):
+    update_config_field('global_tag_limit', limit)
+
+def get_total_tag_count():
+    config = get_config()
+    total = 0
+    # Считаем все теги из словарей и из other_tags
+    for dname in ['content_tags_dict', 'program_tags_dict', 'doc_type_dict']:
+        d = config.get(dname, {})
+        total += len(d)
+    other = config.get('other_tags', [])
+    total += len(other)
+    return total
+
 association_set = set()
-for dic in (Dictionaries.content_tags_dict, Dictionaries.program_tags_dict, Dictionaries.doc_type_dict):
+for dic in (get_dict_by_name("content_tags_dict"), get_dict_by_name("program_tags_dict"), get_dict_by_name("doc_type_dict")):
     association_set.update(dic.keys())
     for values in dic.values():
         association_set.update(values)
 
-const_tags = list(Dictionaries.content_tags_dict.keys()) + list(Dictionaries.program_tags_dict.keys()) + list(Dictionaries.doc_type_dict.keys())
+const_tags = list(get_dict_by_name("content_tags_dict").keys()) + list(get_dict_by_name("program_tags_dict").keys()) + list(get_dict_by_name("doc_type_dict").keys())
 
 if tags_collection.count_documents({}) == 0:
     tags_collection.insert_many([{"name": tag.lower(), "documents": []} for tag in const_tags])
@@ -71,11 +154,13 @@ def upload_document_to_db(title, content,file_path, user, tags=None):
 
     document_id = docs_collection.insert_one(document).inserted_id
 
+    tag_associations = get_dict_by_name("content_tags_dict") | get_dict_by_name("program_tags_dict") | get_dict_by_name("doc_type_dict")
+
     use_flag = 0
     for tag in lower_tags:
         if tag in association_set:
             use_flag = 1
-            for const_tag, related_tags in Dictionaries.tag_associations.items():
+            for const_tag, related_tags in tag_associations.items():
                 if any(SimilarText.is_similar(rt.lower(), tag, threshold=100) for rt in related_tags):
                     tags_collection.update_one(
                         {'name': const_tag},
@@ -169,9 +254,12 @@ def search_by_tag(query):
     query_words = CreateTags.to_nominative_case(query).split()
     keyword_set = set(query_words)
 
+    tag_associations = get_dict_by_name("content_tags_dict") | get_dict_by_name("program_tags_dict") | get_dict_by_name(
+        "doc_type_dict")
+
     matched_keys = set()
     for word in query_words:
-        for key, values in Dictionaries.tag_associations.items():
+        for key, values in tag_associations.items():
             if word in values:
                 matched_keys.add(key)
 
@@ -199,55 +287,3 @@ def search_by_tag(query):
     for case in sorted_documents:
         result.append((case[0], case[2].strftime("%d.%m.%Y %H:%M")))
     return result
-
-def get_config():
-    config = config_collection.find_one({'_id': 'global_config'})
-    if not config:
-        raise HTTPException(status_code=500, detail="Config not found in DB")
-    return config
-
-def update_config_field(field_name, value):
-    config_collection.update_one({'_id': 'global_config'}, {'$set': {field_name: value}})
-
-def get_dict_by_name(dict_name):
-    config = get_config()
-    if dict_name == "other_tags":
-        return config.get('other_tags', [])
-    elif dict_name == "content_tags_dict":
-        return config.get('content_tags_dict', {})
-    elif dict_name == "program_tags_dict":
-        return config.get('program_tags_dict', {})
-    elif dict_name == "doc_type_dict":
-        return config.get('doc_type_dict', {})
-    else:
-        raise HTTPException(status_code=400, detail="Unknown dictionary name")
-
-def set_dict_by_name(dict_name, new_value):
-    if dict_name == "other_tags":
-        update_config_field('other_tags', new_value)
-    elif dict_name == "content_tags_dict":
-        update_config_field('content_tags_dict', new_value)
-    elif dict_name == "program_tags_dict":
-        update_config_field('program_tags_dict', new_value)
-    elif dict_name == "doc_type_dict":
-        update_config_field('doc_type_dict', new_value)
-    else:
-        raise HTTPException(status_code=400, detail="Unknown dictionary name")
-
-def get_global_tag_limit():
-    config = get_config()
-    return config.get('global_tag_limit')
-
-def set_global_tag_limit(limit):
-    update_config_field('global_tag_limit', limit)
-
-def get_total_tag_count():
-    config = get_config()
-    total = 0
-    # Считаем все теги из словарей и из other_tags
-    for dname in ['content_tags_dict', 'program_tags_dict', 'doc_type_dict']:
-        d = config.get(dname, {})
-        total += len(d)
-    other = config.get('other_tags', [])
-    total += len(other)
-    return total
