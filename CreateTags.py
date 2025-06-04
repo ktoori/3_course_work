@@ -2,6 +2,8 @@ import spacy
 from collections import defaultdict
 import pymorphy3
 
+import Dictionaries
+
 nlp = spacy.load('ru_core_news_sm')
 
 def extract_candidate_keyphrases(doc):
@@ -21,7 +23,6 @@ def extract_candidate_keyphrases(doc):
         candidates.append(candidate_phrase)
 
     return candidates
-
 
 def compute_candidate_features(candidates, doc):
     total_tokens = len(doc)
@@ -59,7 +60,7 @@ def to_nominative_case(phrase):
             nominative_words.append(word)
     return ' '.join(nominative_words)
 
-def extract_keywords(text, num_keywords=5):
+def extract_keywords(text, num_keywords=15):
     doc = nlp(text)
     candidates = extract_candidate_keyphrases(doc)
     candidate_features = compute_candidate_features(candidates, doc)
@@ -68,27 +69,6 @@ def extract_keywords(text, num_keywords=5):
     answer = []
     for candidate, feat in sorted_candidates[:50]:
         tag = to_nominative_case(candidate)
-        if (tag) and (tag not in answer):
+        if (tag) and (tag not in answer) and (tag in Dictionaries.other_tags):
             answer.append(tag)
     return answer[:num_keywords]
-
-'''
-if __name__ == "__main__":
-    text = (
-        "Образовательная программа «Программная инженерия» направлена на подготовку специалистов в области информационных технологий, разработчиков и архитекторов программного обеспечения."
-        "Программная инженерия подготавливается в постоянном контакте с такими IT компаниями как Intel, MERA, Google, EPAM, Netcracker. Наши студенты за 4 года получают полноценное и современное образование в области компьютерных наук (computer science) и разработки программного обеспечения (software development)."
-        "С первого курса ведется углубленное обучение программированию, в том числе языкам С, С++, Java, Python. Большое внимание уделяется базовым IT дисциплинам, таким как алгоритмы и структуры данных, операционные системы, базы данных, архитектура компьютеров, компьютерные сети. Наша программа постоянно дополняется и совершенствуется. На текущий момент она включает изучение самые современных технологии и дисциплины - создание систем искусственного интеллекта, разработка пользовательских интерфейсов (UI/UX), создание современных мобильных и веб-приложений и многие другие. Стажировка и практика организуется в компании МЕРА, на конкретном, возможно, будущем рабочем месте, в реальных проектах под руководством ведущих программистов или менеджеров компании."
-        "Качественный математический блок позволяет нашим студентам получить фундаментальные знания, наличие которых является обязательным атрибутом и знаком качества IT специалиста в сегодняшних реалиях."
-        "Важнейшим компонентом программы является изучение английского языка, включающее два года обучения, часть предметов на английском языке, подготовку к сертификации и защиту дипломных работ."
-        "Мы постоянно проводим мероприятия IT тематики, приглашаем ведущие компании и профессиональных разработчиков поделиться своим опытом. Ребята постоянно участвуют в хакатонах, соревнованиях по программированию, IT конференциях. Это позволяет студентам всегда быть в тренде развития области, расширять свой профессиональный кругозор и быть на виду у потенциальных работодателей."
-        )
-
-
-    doc = nlp(text)
-    candidates = extract_candidate_keyphrases(doc)
-    candidate_features = compute_candidate_features(candidates, doc)
-    sorted_candidates = sorted(candidate_features.items(), key=lambda x: x[1]["score"], reverse=True)
-
-    print("Извлечённые ключевые фразы (упрощённый KEA):")
-    for candidate, feat in sorted_candidates[:10]:
-        print(to_nominative_case(candidate))'''

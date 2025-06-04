@@ -253,11 +253,13 @@ def delete_tags(
         for tag in tags_to_delete:
             tag_dict.pop(tag, None)
         mongoDB.set_dict_by_name(dict_name, tag_dict)
+        result = mongoDB.sync_tags_collection()
         return {"message": "Tags deleted successfully", "data": tag_dict}
     elif isinstance(tag_dict, list):
         tag_dict = [t for t in tag_dict if t not in tags_to_delete]
         mongoDB.set_dict_by_name(dict_name, tag_dict)
-        return {"message": "Tags deleted successfully", "data": tag_dict}
+        result = mongoDB.sync_tags_collection()
+        return {"message": "Tags deleted successfully", "data": tag_dict, "r": result}
     else:
         raise HTTPException(status_code=400, detail="Unsupported tag storage type")
 
