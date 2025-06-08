@@ -5,6 +5,7 @@ import CreateTags
 import pytz
 import SimilarText
 import Dictionaries
+import Moderation
 from fastapi import HTTPException
 
 client = MongoClient("mongodb://localhost:27017/")
@@ -13,6 +14,7 @@ db = client['database']
 docs_collection = db["documents"]
 tags_collection = db['tags']
 config_collection = db['config']
+
 
 def load_or_init_config():
     config = config_collection.find_one({'_id': 'global_config'})
