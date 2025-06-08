@@ -4,6 +4,8 @@ from starlette.responses import FileResponse
 from typing import List, Literal
 import os
 from pathlib import Path
+
+import Moderation
 import ReadFile
 import mongoDB
 import CreateTags
@@ -29,6 +31,126 @@ def save_file_to_server(file: UploadFile) -> str:
     return file_location
 
 
+@app.post("/upload_for_moderation", response_model=dict)
+async def upload_document_for_moderation(
+        file: UploadFile = File(...),
+        content_tags: List[str] = Query(
+            list(mongoDB.get_dict_by_name("content_tags_dict").keys()),
+            description="Выберите теги из списка"
+        ),
+        program_track_tags: List[str] = Query(
+            list(mongoDB.get_dict_by_name("program_tags_dict").keys()),
+            description="Выберите теги из списка"
+        ),
+        doc_type_tags: List[str] = Query(
+            list(mongoDB.get_dict_by_name("doc_type_dict").keys()),
+            description="Выберите теги из списка"
+        ),
+        other_tags: List[str] = Query(
+            mongoDB.get_dict_by_name("other_tags"),
+            description="Выберите теги из списка"
+        ),
+        use_auto_tags: bool = Form(
+            True,
+            description="Добавить автоматически сгенерированные теги"
+        ),
+        user: str = Form("student"),
+):
+    """Загрузить документ на модерацию"""
+    try:
+        content = ""
+        if file.filename.endswith('.pdf'):
+            content = await ReadFile.extract_pdf_text(file.file)
+        elif file.filename.endswith('.docx'):
+            content = await ReadFile.extract_docx_text(file.file)
+        elif file.filename.endswith('.xlsx'):
+            content = await ReadFile.extract_xlsx_text(file.file)
+
+        content = ReadFile.clean_text(content) if content else ""
+        file_path = save_file_to_server(file)
+
+        final_tags = []
+
+        if content_tags:
+            final_tags.extend(tag.strip() for tag in content_tags if tag.strip())
+        if program_track_tags:
+            final_tags.extend(tag.strip() for tag in program_track_tags if tag.strip())
+        if doc_type_tags:
+            final_tags.extend(tag.strip() for tag in doc_type_tags if tag.strip())
+        if other_tags:
+            final_tags.extend(tag.strip() for tag in other_tags if tag.strip())
+
+        if use_auto_tags:
+            auto_tags = CreateTags.extract_keywords(content)
+            final_tags.extend(tag for tag in auto_tags if tag not in final_tags)
+
+        if not final_tags:
+            final_tags.append(Path(file.filename).stem.lower())
+
+        final_tags = list(set(final_tags))
+
+        doc_id = Moderation.upload_document_to_moderation(
+            file.filename, content, file_path, user, final_tags
+        )
+        return {
+            "status": "OK",
+            "message": "Документ отправлен на модерацию",
+            "document_id": str(doc_id),
+            "filename": file.filename,
+            "tags": final_tags
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/moderation/documents")
+async def get_documents_for_moderation(
+        status: str = Query(None, description="Статус модерации (pending, approved, rejected)"),
+        admin: str = Query(..., description="Имя администратора")
+):
+    """Получить список документов на модерации"""
+    if admin != "admin":
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    documents = Moderation.get_moderation_documents(status)
+    for doc in documents:
+        doc["_id"] = str(doc["_id"])
+    return JSONResponse(documents)
+
+
+@app.post("/moderation/approve")
+async def approve_moderation_document(
+        doc_id: str = Query(...),
+        admin: str = Query(...),
+        final_tags: List[str] = Query(None)
+):
+    """Одобрить документ после модерации"""
+    if admin != "admin":
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    success = Moderation.approve_document(doc_id, admin, final_tags)
+    if success:
+        return {"status": "OK", "message": "Документ одобрен и добавлен в основную базу"}
+    else:
+        raise HTTPException(status_code=400, detail="Не удалось одобрить документ")
+
+
+@app.post("/moderation/reject")
+async def reject_moderation_document(
+        doc_id: str = Query(...),
+        moderator: str = Query(...),
+        reason: str = Query(None)
+):
+    """Отклонить документ после модерации"""
+    if moderator != "admin":
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    success = Moderation.reject_document(doc_id, moderator)
+    if success:
+        return {"status": "OK", "message": "Документ отклонен"}
+    else:
+        raise HTTPException(status_code=400, detail="Не удалось отклонить документ")
+
 @app.post("/generate_tags")
 async def document_tags(file: UploadFile = File(...)):
     """Анализирует документ и возвращает список тегов"""
@@ -53,33 +175,36 @@ async def document_tags(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/upload", response_model=dict)
 async def upload_document(
-    file: UploadFile = File(...),
-
-    content_tags: List[str] = Query(
-        list(mongoDB.get_dict_by_name("content_tags_dict").keys()),
-        description="Выберите теги из списка"
-    ),
-    program_track_tags: List[str] = Query(
-        list(mongoDB.get_dict_by_name("program_tags_dict").keys()),
-        description="Выберите теги из списка"
-    ),
-    doc_type_tags: List[str] = Query(
-        list(mongoDB.get_dict_by_name("doc_type_dict").keys()),
-        description="Выберите теги из списка"
-    ),
-    other_tags: List[str] = Query(
-        mongoDB.get_dict_by_name("other_tags"),
-        description="Выберите теги из списка"
-    ),
-    use_auto_tags: bool = Form(
-        True,
-        description="Добавить автоматически сгенерированные теги"
-    ),
-    user: str = Form("student"),
+        file: UploadFile = File(...),
+        content_tags: List[str] = Query(
+            list(mongoDB.get_dict_by_name("content_tags_dict").keys()),
+            description="Выберите теги из списка"
+        ),
+        program_track_tags: List[str] = Query(
+            list(mongoDB.get_dict_by_name("program_tags_dict").keys()),
+            description="Выберите теги из списка"
+        ),
+        doc_type_tags: List[str] = Query(
+            list(mongoDB.get_dict_by_name("doc_type_dict").keys()),
+            description="Выберите теги из списка"
+        ),
+        other_tags: List[str] = Query(
+            mongoDB.get_dict_by_name("other_tags"),
+            description="Выберите теги из списка"
+        ),
+        use_auto_tags: bool = Form(
+            True,
+            description="Добавить автоматически сгенерированные теги"
+        ),
+        user: str = Form("admin"),
 ):
-    """Загрузить документ с выбранными тегами"""
+    """Загрузить документ с выбранными тегами (только для администраторов)"""
+    if user != "admin":
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
     content = ""
     if file.filename.endswith('.pdf'):
         content = await ReadFile.extract_pdf_text(file.file)
