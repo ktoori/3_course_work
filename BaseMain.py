@@ -4,12 +4,13 @@ from starlette.responses import FileResponse
 from typing import List, Literal
 import os
 from pathlib import Path
+import nltk
 
 import Moderation
 import ReadFile
 import mongoDB
-import CreateTags
-import nltk
+from mongoDB import TagStructure, SearchFunction
+from CreateTags import TagService
 
 
 nltk.download('punkt')
@@ -19,6 +20,13 @@ app = FastAPI()
 UPLOAD_DIRECTORY = "uploads"
 if not os.path.exists(UPLOAD_DIRECTORY):
     os.makedirs(UPLOAD_DIRECTORY)
+
+tag_structure = TagStructure()
+
+CONTENT_TAGS = list(tag_structure.get_dict_by_name("content_tags_dict").keys())
+PROGRAM_TAGS = list(tag_structure.get_dict_by_name("program_tags_dict").keys())
+DOC_TYPE_TAGS = list(tag_structure.get_dict_by_name("doc_type_dict").keys())
+OTHER_TAGS = tag_structure.get_dict_by_name("other_tags")
 
 def save_file_to_server(file: UploadFile) -> str:
     file_name = Path(file.filename).name
@@ -31,23 +39,24 @@ def save_file_to_server(file: UploadFile) -> str:
     return file_location
 
 
+
 @app.post("/upload_for_moderation", response_model=dict)
 async def upload_document_for_moderation(
         file: UploadFile = File(...),
         content_tags: List[str] = Query(
-            list(mongoDB.get_dict_by_name("content_tags_dict").keys()),
+            CONTENT_TAGS,
             description="Выберите теги из списка"
         ),
         program_track_tags: List[str] = Query(
-            list(mongoDB.get_dict_by_name("program_tags_dict").keys()),
+            PROGRAM_TAGS,
             description="Выберите теги из списка"
         ),
         doc_type_tags: List[str] = Query(
-            list(mongoDB.get_dict_by_name("doc_type_dict").keys()),
+            DOC_TYPE_TAGS,
             description="Выберите теги из списка"
         ),
         other_tags: List[str] = Query(
-            mongoDB.get_dict_by_name("other_tags"),
+            OTHER_TAGS,
             description="Выберите теги из списка"
         ),
         use_auto_tags: bool = Form(
@@ -81,7 +90,8 @@ async def upload_document_for_moderation(
             final_tags.extend(tag.strip() for tag in other_tags if tag.strip())
 
         if use_auto_tags:
-            auto_tags = CreateTags.extract_keywords(content)
+            tag_service = TagService()
+            auto_tags = tag_service.extract_keywords(content)
             final_tags.extend(tag for tag in auto_tags if tag not in final_tags)
 
         if not final_tags:
@@ -164,7 +174,8 @@ async def document_tags(file: UploadFile = File(...)):
             content = await ReadFile.extract_xlsx_text(file.file)
 
         content = ReadFile.clean_text(content) if content else ""
-        auto_tags = CreateTags.extract_keywords(content)
+        tag_service = TagService()
+        auto_tags = tag_service.extract_keywords(content)
 
         return JSONResponse({
             "filename": file.filename,
@@ -180,19 +191,19 @@ async def document_tags(file: UploadFile = File(...)):
 async def upload_document(
         file: UploadFile = File(...),
         content_tags: List[str] = Query(
-            list(mongoDB.get_dict_by_name("content_tags_dict").keys()),
+            CONTENT_TAGS,
             description="Выберите теги из списка"
         ),
         program_track_tags: List[str] = Query(
-            list(mongoDB.get_dict_by_name("program_tags_dict").keys()),
+            PROGRAM_TAGS,
             description="Выберите теги из списка"
         ),
         doc_type_tags: List[str] = Query(
-            list(mongoDB.get_dict_by_name("doc_type_dict").keys()),
+            DOC_TYPE_TAGS,
             description="Выберите теги из списка"
         ),
         other_tags: List[str] = Query(
-            mongoDB.get_dict_by_name("other_tags"),
+            OTHER_TAGS,
             description="Выберите теги из списка"
         ),
         use_auto_tags: bool = Form(
@@ -230,7 +241,8 @@ async def upload_document(
     selected_tags= [final_tags]
     # Добавляем автоматические теги (если включено)
     if use_auto_tags:
-        auto_tags = CreateTags.extract_keywords(content)
+        tag_service = TagService()
+        auto_tags = tag_service.extract_keywords(content)
         final_tags.extend(tag for tag in auto_tags if tag not in final_tags)
 
     # Если нет тегов - используем имя файла
@@ -257,8 +269,9 @@ async def upload_document(
 
 @app.get("/search")
 async def search(query: str):
-    result = mongoDB.search_by_tag(query)
-    return ' '.join(result)
+    search = SearchFunction()
+    result = search.search_by_tag(query)
+    return result
 
 
 @app.get("/get_document")
@@ -305,7 +318,8 @@ async def update_document(file_id: str, file: UploadFile):
             content = ReadFile.extract_docx_text(file.file)
         elif file.filename.endswith('.xlsx'):
             content = ReadFile.extract_xlsx_text(file.file)
-        tags = CreateTags.extract_keywords(content)
+        tag_service = TagService()
+        tags = tag_service.extract_keywords(content)
         # Удаляем старый файл с сервера
         if os.path.exists(document['file_path']):
             os.remove(document['file_path'])
@@ -328,27 +342,28 @@ def add_tag(
         dict_name: Literal["other_tags", "content_tags_dict", "program_tags_dict", "doc_type_dict"] = Query(...),
         tag: str = Query(...),
         associations: str = Query("")):
+    tag_structure = TagStructure()
     if dict_name == "other_tags":
-        other_tags = mongoDB.get_dict_by_name("other_tags")
+        other_tags = tag_structure.get_dict_by_name("other_tags")
         if tag not in other_tags:
             # Проверяем лимит
-            total_tags = mongoDB.get_total_tag_count()
-            limit = mongoDB.get_global_tag_limit()
+            total_tags = tag_structure.get_total_tag_count()
+            limit = tag_structure.get_global_tag_limit()
             if limit is not None and total_tags >= limit:
                 raise HTTPException(status_code=400, detail="Global tag limit exceeded")
             other_tags.append(tag)
-            mongoDB.set_dict_by_name("other_tags", other_tags)
-            result = mongoDB.sync_tags_collection()
+            tag_structure.set_dict_by_name("other_tags", other_tags)
+            result = tag_structure.sync_tags_collection()
             return {"message": "Tag added to other_tags", "data": other_tags, "r": result}
         else:
             return {"message": "Tag already exists in other_tags", "data": other_tags}
 
-    tag_dict = mongoDB.get_dict_by_name(dict_name)
+    tag_dict = tag_structure.get_dict_by_name(dict_name)
     if not isinstance(tag_dict, dict):
         raise HTTPException(status_code=400, detail="Target dictionary is not a dict")
 
-    total_tags = mongoDB.get_total_tag_count()
-    limit = mongoDB.get_global_tag_limit()
+    total_tags = tag_structure.get_total_tag_count()
+    limit = tag_structure.get_global_tag_limit()
     is_new = tag not in tag_dict
     if limit is not None and total_tags >= limit and is_new:
         raise HTTPException(status_code=400, detail="Global tag limit exceeded")
@@ -362,8 +377,8 @@ def add_tag(
     else:
         tag_dict[tag] = assoc_list
 
-    mongoDB.set_dict_by_name(dict_name, tag_dict)
-    result = mongoDB.sync_tags_collection()
+    tag_structure.set_dict_by_name(dict_name, tag_dict)
+    result = tag_structure.sync_tags_collection()
     return {"message": "Tag added successfully", "data": tag_dict, "r": result}
 
 
@@ -371,19 +386,20 @@ def add_tag(
 def delete_tags(
         dict_name: Literal["other_tags", "content_tags_dict", "program_tags_dict", "doc_type_dict"] = Query(...),
         tags: str = Query(...)):
-    tag_dict = mongoDB.get_dict_by_name(dict_name)
+    tag_structure = TagStructure()
+    tag_dict = tag_structure.get_dict_by_name(dict_name)
     tags_to_delete = tags.split()
 
     if isinstance(tag_dict, dict):
         for tag in tags_to_delete:
             tag_dict.pop(tag, None)
-        mongoDB.set_dict_by_name(dict_name, tag_dict)
-        result = mongoDB.sync_tags_collection()
+        tag_structure.set_dict_by_name(dict_name, tag_dict)
+        result =  tag_structure.sync_tags_collection()
         return {"message": "Tags deleted successfully", "data": tag_dict}
     elif isinstance(tag_dict, list):
         tag_dict = [t for t in tag_dict if t not in tags_to_delete]
-        mongoDB.set_dict_by_name(dict_name, tag_dict)
-        result = mongoDB.sync_tags_collection()
+        tag_structure.set_dict_by_name(dict_name, tag_dict)
+        result =  tag_structure.sync_tags_collection()
         return {"message": "Tags deleted successfully", "data": tag_dict, "r": result}
     else:
         raise HTTPException(status_code=400, detail="Unsupported tag storage type")
@@ -391,7 +407,8 @@ def delete_tags(
 
 @app.get("/get_tags")
 def get_tags():
-    config = mongoDB.get_config()
+    tag_structure = TagStructure()
+    config =  tag_structure.get_config()
     return {
         "content_tags": config.get("content_tags_dict", {}),
         "program_tags": config.get("program_tags_dict", {}),
@@ -403,7 +420,8 @@ def get_tags():
 
 @app.post("/set_limit", summary="Установить глобальный лимит на количество тегов")
 def set_limit(limit: int):
-    mongoDB.set_global_tag_limit(limit)
+    tag_structure = TagStructure()
+    tag_structure.set_global_tag_limit(limit)
     return {"message": "Global limit updated", "limit": limit}
 
 if __name__ == '__main__':

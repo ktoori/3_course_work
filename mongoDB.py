@@ -1,12 +1,11 @@
-# mongoDB.py
 from pymongo import MongoClient
 from datetime import datetime
-import CreateTags
 import pytz
-import SimilarText
-import Dictionaries
-import Moderation
 from fastapi import HTTPException
+
+from CreateTags import TagService
+import Dictionaries
+import SimilarText
 
 client = MongoClient("mongodb://localhost:27017/")
 db = client['database']
@@ -16,115 +15,219 @@ tags_collection = db['tags']
 config_collection = db['config']
 
 
-def load_or_init_config():
-    config = config_collection.find_one({'_id': 'global_config'})
-    if not config:
-        config = {
-            '_id': 'global_config',
-            'global_tag_limit': Dictionaries.global_tag_limit,
-            'other_tags': Dictionaries.other_tags,
-            'content_tags_dict': Dictionaries.content_tags_dict,
-            'program_tags_dict': Dictionaries.program_tags_dict,
-            'doc_type_dict': Dictionaries.doc_type_dict
+class TagStructure:
+    """
+    Класс функций по изменению структуры тегов
+    """
+
+    def __init__(self):
+        self.init_cofig()
+
+        self.association_set = set()
+        for dic in (self.get_dict_by_name("content_tags_dict"), self.get_dict_by_name("program_tags_dict"),
+                    self.get_dict_by_name("doc_type_dict")):
+            self.association_set.update(dic.keys())
+            for values in dic.values():
+                self.association_set.update(values)
+        self.const_tags = list(self.get_dict_by_name("content_tags_dict").keys()) + list(
+            self.get_dict_by_name("program_tags_dict").keys()) + list(self.get_dict_by_name("doc_type_dict").keys())
+        if tags_collection.count_documents({}) == 0:
+            tags_collection.insert_many([{"name": tag.lower(), "documents": []} for tag in self.const_tags])
+        self.tag_associations = self.get_dict_by_name("content_tags_dict") | self.get_dict_by_name("program_tags_dict") | self.get_dict_by_name("doc_type_dict")
+
+
+    def init_cofig(self):
+        config = config_collection.find_one({'_id': 'global_config'})
+        if not config:
+            config = {
+                '_id': 'global_config',
+                'global_tag_limit': Dictionaries.global_tag_limit,
+                'other_tags': Dictionaries.other_tags,
+                'content_tags_dict': Dictionaries.content_tags_dict,
+                'program_tags_dict': Dictionaries.program_tags_dict,
+                'doc_type_dict': Dictionaries.doc_type_dict
+            }
+            config_collection.insert_one(config)
+        return config
+
+
+    def get_config(self):
+        config = config_collection.find_one({'_id': 'global_config'})
+        if not config:
+            raise HTTPException(status_code=500, detail="config not found in DB")
+        return config
+
+
+    def sync_tags_collection(self):
+        """
+        Оюновляет коллекцию тегов в базе данных
+        :return: возвращает результат работы
+        """
+        config = self.get_config()
+        current_tags = set(list(config.get("content_tags_dict", {}).keys()) + list(config.get("program_tags_dict", {}).keys()) + list(config.get("doc_type_dict", {}).keys()))
+        existing_tags_cursor = tags_collection.find({}, {"name": 1, "_id": 0})
+        existing_tags = set(doc["name"] for doc in existing_tags_cursor)
+
+        tags_to_add = current_tags - existing_tags
+        tags_to_remove = existing_tags - current_tags
+
+        if tags_to_add:
+            for tag in tags_to_add:
+                tags_collection.update_one(
+                    {"name": tag.lower()},
+                    {"$setOnInsert": {"documents": []}},
+                    upsert = True
+                )
+
+        if tags_to_remove:
+            tags_collection.delete_many({"name": {"$in": list(tags_to_remove)}})
+        return {
+            "tags_added": list(tags_to_add),
+            "tags_removed": list(tags_to_remove)
         }
-        config_collection.insert_one(config)
-    return config
 
-config = load_or_init_config()
 
-def get_config():
-    config = config_collection.find_one({'_id': 'global_config'})
-    if not config:
-        raise HTTPException(status_code=500, detail="Config not found in DB")
-    return config
+    def update_config_field(self, field_name, value):
+        config_collection.update_one({'_id': 'global_config'}, {'$set': {field_name: value}})
 
-def sync_tags_collection():
-    config = get_config()
-    current_tags = set(
-        list(config.get("content_tags_dict", {}).keys()) +
-        list(config.get("program_tags_dict", {}).keys()) +
-        list(config.get("doc_type_dict", {}).keys())
-    )
 
-    # Получаем теги из коллекции
-    existing_tags_cursor = tags_collection.find({}, {"name": 1, "_id": 0})
-    existing_tags = set(doc["name"] for doc in existing_tags_cursor)
+    def get_dict_by_name(self, dict_name):
+        """
+        Возвращает значения словаря по названию
+        :param dict_name: название словаря
+        :return: массив или словарь значений
+        """
+        config = self.get_config()
+        if dict_name == "other_tags":
+            return config.get('other_tags', [])
+        elif dict_name == "content_tags_dict":
+            return config.get('content_tags_dict', {})
+        elif dict_name == "program_tags_dict":
+            return config.get('program_tags_dict', {})
+        elif dict_name == "doc_type_dict":
+            return config.get('doc_type_dict', {})
+        else:
+            raise HTTPException(status_code=400, detail="Unknown dictionary name")
 
-    # Теги для добавления
-    tags_to_add = current_tags - existing_tags
-    # Теги для удаления
-    tags_to_remove = existing_tags - current_tags
 
-    if tags_to_add:
-        for tag in tags_to_add:
-            tags_collection.update_one(
-                {"name": tag.lower()},
-                {"$setOnInsert": {"documents": []}},
-                upsert=True)
+    def set_dict_by_name(self, dict_name, new_value):
+        """
+        Обновить словарь тегов
+        :param dict_name: название словаря
+        :param new_value: новые значения
+        :return:
+        """
+        if dict_name == "other_tags":
+            self.update_config_field('other_tags', new_value)
+        elif dict_name == "content_tags_dict":
+            self.update_config_field('content_tags_dict', new_value)
+        elif dict_name == "program_tags_dict":
+            self.update_config_field('program_tags_dict', new_value)
+        elif dict_name == "doc_type_dict":
+            self.update_config_field('doc_type_dict', new_value)
+        else:
+            raise HTTPException(status_code=400, detail="Unknown dictionary name")
 
-    if tags_to_remove:
-        tags_collection.delete_many({"name": {"$in": list(tags_to_remove)}})
-    return {
-        "tags_added": list(tags_to_add),
-        "tags_removed": list(tags_to_remove)
-    }
 
-def update_config_field(field_name, value):
-    config_collection.update_one({'_id': 'global_config'}, {'$set': {field_name: value}})
+    def get_global_tag_limit(self):
+        """
+        Получить лимит тегов
+        :return: значение лимита
+        """
+        config = self.get_config()
+        return  config.get('global_tag_limit')
 
-def get_dict_by_name(dict_name):
-    config = get_config()
-    if dict_name == "other_tags":
-        return config.get('other_tags', [])
-    elif dict_name == "content_tags_dict":
-        return config.get('content_tags_dict', {})
-    elif dict_name == "program_tags_dict":
-        return config.get('program_tags_dict', {})
-    elif dict_name == "doc_type_dict":
-        return config.get('doc_type_dict', {})
-    else:
-        raise HTTPException(status_code=400, detail="Unknown dictionary name")
 
-def set_dict_by_name(dict_name, new_value):
-    if dict_name == "other_tags":
-        update_config_field('other_tags', new_value)
-    elif dict_name == "content_tags_dict":
-        update_config_field('content_tags_dict', new_value)
-    elif dict_name == "program_tags_dict":
-        update_config_field('program_tags_dict', new_value)
-    elif dict_name == "doc_type_dict":
-        update_config_field('doc_type_dict', new_value)
-    else:
-        raise HTTPException(status_code=400, detail="Unknown dictionary name")
+    def set_global_tag_limit(self, limit):
+        """
+        Установить лимит тегов
+        :param limit: значение для лимита
+        """
+        self.update_config_field('global_tag_limit', limit)
 
-def get_global_tag_limit():
-    config = get_config()
-    return config.get('global_tag_limit')
 
-def set_global_tag_limit(limit):
-    update_config_field('global_tag_limit', limit)
+    def get_total_tag_count(self):
+        """
+        Получить количество всех тегов
+        :return: количество тегов
+        """
+        config = self.get_config()
+        total = 0
 
-def get_total_tag_count():
-    config = get_config()
-    total = 0
-    # Считаем все теги из словарей и из other_tags
-    for dname in ['content_tags_dict', 'program_tags_dict', 'doc_type_dict']:
-        d = config.get(dname, {})
-        total += len(d)
-    other = config.get('other_tags', [])
-    total += len(other)
-    return total
+        for dict_name in ['content_tags_dict', 'program_tags_dict', 'doc_type_dict']:
+            dict = config.get(dict_name, {})
+            total += len(dict)
+        tag_arr = config.get('other_tags', [])
+        total += len(tag_arr)
 
-association_set = set()
-for dic in (get_dict_by_name("content_tags_dict"), get_dict_by_name("program_tags_dict"), get_dict_by_name("doc_type_dict")):
-    association_set.update(dic.keys())
-    for values in dic.values():
-        association_set.update(values)
+        return total
 
-const_tags = list(get_dict_by_name("content_tags_dict").keys()) + list(get_dict_by_name("program_tags_dict").keys()) + list(get_dict_by_name("doc_type_dict").keys())
 
-if tags_collection.count_documents({}) == 0:
-    tags_collection.insert_many([{"name": tag.lower(), "documents": []} for tag in const_tags])
+    def get_documents_by_tag(self, tag_name):
+        """
+        Получить список документов, связанных с тегом
+        :param tag_name: тег
+        :return: массив ID документов
+        """
+        tag = tags_collection.find_one({"name": tag_name}, {"documents": 1})
+        if tag:
+            return tag.get("documents", [])
+        else:
+            return None
+
+
+class SearchFunction:
+    """
+    Класс функций для поиска по тегам
+    """
+
+    def search_by_tag(self, query):
+        """
+        Поиск документа по запросу
+        :param query: запрос
+        :return: массив релевантных документов
+        """
+        tag_methods = TagService()
+        tag_structure = TagStructure()
+        query_words = tag_methods.to_nominative_case(query).split()
+        keyword_set = set(query_words)
+
+        tag_associations = (tag_structure.get_dict_by_name("content_tags_dict") |
+                            tag_structure.get_dict_by_name("program_tags_dict") |
+                            tag_structure.get_dict_by_name("doc_type_dict"))
+
+        matched_keys = set()
+        for word in query_words:
+            for key, values in tag_associations.items():
+                if word in values:
+                    matched_keys.add(key)
+
+        relevance_score = []
+        seen_ids = set()
+
+        for key in matched_keys:
+            word_docs = tag_structure.get_documents_by_tag(key)
+            if word_docs:
+                for doc_id in word_docs:
+                    if str(doc_id['_id']) not in seen_ids:
+                        seen_ids.add(str(doc_id['_id']))
+                        doc = docs_collection.find_one({"_id":doc_id['_id']})
+                        doc_tags_set = set(doc['tags'])
+                        matches = keyword_set.intersection(doc_tags_set)
+                        date = datetime.strptime(doc['created_at'], '%Y-%m-%d %H:%M:%S')
+                        if matches:
+                            relevance_score.append((str(doc_id['_id']), len(matches), date))
+                            if len(relevance_score) > 20:
+                                relevance_score.sort(key=lambda x: (x[1], x[2]))
+                                relevance_score.pop(0)
+
+        sorted_documents = sorted(relevance_score, key=lambda x: (x[1], x[2]), reverse=True)
+        result = []
+        for case in sorted_documents:
+            result.append((case[0], case[2].strftime("%d.%m.%Y %H:%M")))
+        return result
+
+
 
 def upload_document_to_db(title, content,file_path, user, tags=None):
     duplicate = docs_collection.find_one({
@@ -156,7 +259,9 @@ def upload_document_to_db(title, content,file_path, user, tags=None):
 
     document_id = docs_collection.insert_one(document).inserted_id
 
-    tag_associations = get_dict_by_name("content_tags_dict") | get_dict_by_name("program_tags_dict") | get_dict_by_name("doc_type_dict")
+    tag_structure = TagStructure()
+    tag_associations = tag_structure.tag_associations
+    association_set = tag_structure.association_set
 
     use_flag = 0
     for tag in lower_tags:
@@ -201,6 +306,10 @@ def delete_document_db(doc_id):
         if document:
             tags = document.get("tags")
         result = docs_collection.delete_one({"_id": doc_id})
+
+        tag_structure = TagStructure()
+        const_tags = tag_structure.const_tags
+
         if result.deleted_count > 0:
             print("Документ успешно удален.")
             for tag in tags:
@@ -242,50 +351,3 @@ def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_titl
     except Exception as e:
         print(f"Ошибка: {str(e)}")
         return 0
-
-def get_documents_by_tag(tag_name):
-    tag = tags_collection.find_one({"name": tag_name}, {"documents": 1})
-    if tag:
-        return tag.get("documents", [])
-    else:
-        return None
-
-
-def search_by_tag(query):
-
-    query_words = CreateTags.to_nominative_case(query).split()
-    keyword_set = set(query_words)
-
-    tag_associations = get_dict_by_name("content_tags_dict") | get_dict_by_name("program_tags_dict") | get_dict_by_name(
-        "doc_type_dict")
-
-    matched_keys = set()
-    for word in query_words:
-        for key, values in tag_associations.items():
-            if word in values:
-                matched_keys.add(key)
-
-    relevance_scores = []
-    seen_ids = set()
-
-    for key in matched_keys:
-        word_docs = get_documents_by_tag(key)
-        if word_docs:
-            for doc_id in word_docs:
-                if str(doc_id['_id']) not in seen_ids:
-                    seen_ids.add(str(doc_id['_id']))
-                    doc = docs_collection.find_one({"_id": doc_id['_id']})
-                    doc_tags_set = set(doc['tags'])
-                    matches = keyword_set.intersection(doc_tags_set)
-                    date = datetime.strptime(doc['created_at'], '%Y-%m-%d %H:%M:%S')
-                    if matches:
-                        relevance_scores.append((str(doc_id['_id']), len(matches), date))
-                        if len(relevance_scores) > 20:
-                            relevance_scores.sort(key=lambda x: (x[1], x[2]))
-                            relevance_scores.pop(0)
-
-    sorted_documents = sorted(relevance_scores,  key=lambda x: (x[1], x[2]), reverse=True)
-    result = []
-    for case in sorted_documents:
-        result.append((case[0], case[2].strftime("%d.%m.%Y %H:%M")))
-    return result

@@ -1,74 +1,112 @@
 import spacy
-from collections import defaultdict
 import pymorphy3
 
 import Dictionaries
 
-nlp = spacy.load('ru_core_news_sm')
+class TagService:
+    """
+    Класс функций для извлечения тегов из текста документа
+    """
 
-def extract_candidate_keyphrases(doc):
-    candidates = []
-    candidate_tokens = []
+    def __init__(self):
+        self.nlp = spacy.load('ru_core_news_sm')
 
-    for token in doc:
-        if token.pos_ in ("ADJ", "NOUN", "PROPN"):
-            candidate_tokens.append(token.text.lower())
-        else:
-            if candidate_tokens:
-                candidate_phrase = " ".join(candidate_tokens)
-                candidates.append(candidate_phrase)
-                candidate_tokens = []
-    if candidate_tokens:
-        candidate_phrase = " ".join(candidate_tokens)
-        candidates.append(candidate_phrase)
 
-    return candidates
+    def get_candidates(self, text):
+        """
+        Возвращает список фраз и слов - возможных тегов
+        :param text: текст документа, обработанный с помощью spacy
+        :return: массив тегов
+        """
+        candidates = []
+        candidates_tokens = []
 
-def compute_candidate_features(candidates, doc):
-    total_tokens = len(doc)
-    features = defaultdict(lambda: {"freq": 0, "first_occurrence": total_tokens})
+        for token in text:
+            if token.pos_ in ("ADJ", "NOUN", "PROPN"):
+                candidates_tokens.append(token.text.lower())
+            else:
+                if candidates_tokens:
+                    cand_phrase = " ".join(candidates_tokens)
+                    candidates.append(cand_phrase)
+                    candidates_tokens = []
 
-    for candidate in candidates:
-        features[candidate]["freq"] += 1
+        if candidates_tokens:
+            cand_phrase = " ".join(candidates_tokens)
+            candidates.append(cand_phrase)
 
-    for candidate in features:
-        candidate_tokens = candidate.split()
-        first_index = total_tokens
-        for i in range(total_tokens - len(candidate_tokens) + 1):
-            window = [doc[j].text.lower() for j in range(i, i + len(candidate_tokens))]
-            if window == candidate_tokens:
-                first_index = i
-                break
-        features[candidate]["first_occurrence"] = first_index
+        return candidates
 
-    for candidate, feat in features.items():
-        pos_factor = 1 - (feat["first_occurrence"] / total_tokens)
-        feat["score"] = feat["freq"] * pos_factor
 
-    return features
+    def feature_counting(self, candidates, doc_text):
+        """
+        Подсчитывает вероятность, что кандидат является тегом
+        :param candidates: список кандидатов
+        :param doc_text: текст документа, обработанный spacy
+        :return: словарь, где ключ - кандидат, значение - словарь с полями: частота, первое вхождение, вероятность
+        """
+        total_tokens = len(doc_text)
+        features = {}
 
-def to_nominative_case(phrase):
-    morph = pymorphy3.MorphAnalyzer()
-    words = phrase.split()
-    nominative_words = []
+        for candidate in candidates:
+            if candidate not in features:
+                features[candidate] = {"frequency": 0, "first_enter": total_tokens}
+            features[candidate]["frequency"] += 1
 
-    for word in words:
-        word_norm = morph.parse(word)[0].inflect({'sing', 'nomn'})
-        if word_norm:
-            nominative_words.append(word_norm.word)
-        else:
-            nominative_words.append(word)
-    return ' '.join(nominative_words)
+        for candidate in features:
+            candidate_tokens = candidate.split()
+            first_index = total_tokens
+            for i in range(total_tokens - len(candidate_tokens) + 1):
+                window = []
+                for j in range(i, i + len(candidate_tokens)):
+                    window.append(doc_text[j].text.lower())
+                if window == candidate_tokens:
+                    first_index = i
+                    break
+            features[candidate]["first_enter"] = first_index
 
-def extract_keywords(text, num_keywords=15):
-    doc = nlp(text)
-    candidates = extract_candidate_keyphrases(doc)
-    candidate_features = compute_candidate_features(candidates, doc)
-    sorted_candidates = sorted(candidate_features.items(), key=lambda x: x[1]["score"], reverse=True)
+        for candidate, feat in features.items():
+            pos_score = 1 - (feat["first_enter"]/total_tokens)
+            feat["score"] = feat["frequency"]*pos_score
 
-    answer = []
-    for candidate, feat in sorted_candidates[:50]:
-        tag = to_nominative_case(candidate)
-        if (tag) and (tag not in answer) and (tag in Dictionaries.other_tags):
-            answer.append(tag)
-    return answer[:num_keywords]
+        return features
+
+
+    def to_nominative_case(self, phrase):
+        """
+        Приводит фразу к именительному падежу слова
+        :param phrase: входной текст
+        :return: текст в именительном падеже
+        """
+        morph = pymorphy3.MorphAnalyzer()
+        words = phrase.split()
+        nominative_words = []
+
+        for word in words:
+            word_norm = morph.parse(word)[0].inflect({'sing', 'nomn'})
+            if word_norm:
+                nominative_words.append(word)
+            else:
+                nominative_words.append(word)
+
+        return ' '.join(nominative_words)
+
+
+    def extract_keywords(self, text, num_keywords=15):
+        """
+        Функция извлечения ключевого слова из текста
+        :param text: текст документа
+        :param num_keywords: количество ключевых слов в результате
+        :return: массив ключевых слов
+        """
+        doc = self.nlp(text)
+        candidates = self.get_candidates(doc)
+        candidates_features = self.feature_counting(candidates, doc)
+        sorted_candidates = sorted(candidates_features.items(), key=lambda x: x[1]["score"], reverse = True)
+
+        answer = []
+        for candidate, feature in sorted_candidates:
+            tag = self.to_nominative_case(candidate)
+            if (tag) and (tag not in answer) and (tag in Dictionaries.other_tags):
+                answer.append(tag)
+
+        return answer[:num_keywords]
