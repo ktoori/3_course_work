@@ -10,7 +10,7 @@ import Moderation
 import ReadFile
 import mongoDB
 from mongoDB import TagStructure, SearchFunction
-from create_tag import TagGenerate
+from CreateTags import TagGenerate
 
 
 nltk.download('punkt')

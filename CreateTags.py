@@ -1,8 +1,6 @@
 import spacy
 import pymorphy3
 
-import Dictionaries
-from Dictionaries import other_tags
 from mongoDB import TagStructure
 
 

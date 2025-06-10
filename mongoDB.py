@@ -3,7 +3,6 @@ from datetime import datetime
 import pytz
 from fastapi import HTTPException
 
-from create_tag import TagGenerate
 import Dictionaries
 import SimilarText
 
@@ -187,6 +186,7 @@ class SearchFunction:
         :param query: запрос
         :return: массив релевантных документов
         """
+        from CreateTags import TagGenerate
         tag_methods = TagGenerate()
         tag_structure = TagStructure()
         query_words = tag_methods.to_nominative_case(query).split()
