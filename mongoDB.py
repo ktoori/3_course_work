@@ -3,7 +3,7 @@ from datetime import datetime
 import pytz
 from fastapi import HTTPException
 
-from CreateTags import TagGenerate
+from create_tag import TagGenerate
 import Dictionaries
 import SimilarText
 

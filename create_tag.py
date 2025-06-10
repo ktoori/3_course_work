@@ -2,6 +2,9 @@ import spacy
 import pymorphy3
 
 import Dictionaries
+from Dictionaries import other_tags
+from mongoDB import TagStructure
+
 
 class TagGenerate:
     """
@@ -84,7 +87,7 @@ class TagGenerate:
         for word in words:
             word_norm = morph.parse(word)[0].inflect({'sing', 'nomn'})
             if word_norm:
-                nominative_words.append(word)
+                nominative_words.append(word_norm)
             else:
                 nominative_words.append(word)
 
@@ -104,9 +107,11 @@ class TagGenerate:
         sorted_candidates = sorted(candidates_features.items(), key=lambda x: x[1]["score"], reverse = True)
 
         answer = []
+        tag_structure = TagStructure()
+        other_tags = tag_structure.get_dict_by_name("other_tags")
         for candidate, feature in sorted_candidates:
             tag = self.to_nominative_case(candidate)
-            if (tag) and (tag not in answer) and (tag in Dictionaries.other_tags):
+            if (tag) and (tag not in answer) and (tag in other_tags):
                 answer.append(tag)
 
         return answer[:num_keywords]

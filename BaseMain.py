@@ -10,7 +10,7 @@ import Moderation
 import ReadFile
 import mongoDB
 from mongoDB import TagStructure, SearchFunction
-from CreateTags import TagService
+from create_tag import TagGenerate
 
 
 nltk.download('punkt')
@@ -90,7 +90,7 @@ async def upload_document_for_moderation(
             final_tags.extend(tag.strip() for tag in other_tags if tag.strip())
 
         if use_auto_tags:
-            tag_service = TagService()
+            tag_service = TagGenerate()
             auto_tags = tag_service.extract_keywords(content)
             final_tags.extend(tag for tag in auto_tags if tag not in final_tags)
 
@@ -174,7 +174,7 @@ async def document_tags(file: UploadFile = File(...)):
             content = await ReadFile.extract_xlsx_text(file.file)
 
         content = ReadFile.clean_text(content) if content else ""
-        tag_service = TagService()
+        tag_service = TagGenerate()
         auto_tags = tag_service.extract_keywords(content)
 
         return JSONResponse({
@@ -241,7 +241,7 @@ async def upload_document(
     selected_tags= [final_tags]
     # Добавляем автоматические теги (если включено)
     if use_auto_tags:
-        tag_service = TagService()
+        tag_service = TagGenerate()
         auto_tags = tag_service.extract_keywords(content)
         final_tags.extend(tag for tag in auto_tags if tag not in final_tags)
 
@@ -318,7 +318,7 @@ async def update_document(file_id: str, file: UploadFile):
             content = ReadFile.extract_docx_text(file.file)
         elif file.filename.endswith('.xlsx'):
             content = ReadFile.extract_xlsx_text(file.file)
-        tag_service = TagService()
+        tag_service = TagGenerate()
         tags = tag_service.extract_keywords(content)
         # Удаляем старый файл с сервера
         if os.path.exists(document['file_path']):
