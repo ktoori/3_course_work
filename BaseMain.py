@@ -267,10 +267,10 @@ async def upload_document(
     }
 
 
-@app.get("/search")
+@app.get("/search",  summary="Найти документ по запросу")
 async def search(query: str):
-    search = SearchFunction()
-    result = search.search_by_tag(query)
+    _search = SearchFunction()
+    result = _search.search_by_tag(query)
     return result
 
 
@@ -341,74 +341,90 @@ async def update_document(file_id: str, file: UploadFile):
 def add_tag(
         dict_name: Literal["other_tags", "content_tags_dict", "program_tags_dict", "doc_type_dict"] = Query(...),
         tag: str = Query(...),
-        associations: str = Query("")):
+        associations: str = Query("")
+):
+    """
+    Добавляет тег в словари в config
+    :param dict_name: название словаря
+    :param tag: добавляемый тег (название категории)
+    :param associations: ассоциации с тегом
+    """
     tag_structure = TagStructure()
     if dict_name == "other_tags":
         other_tags = tag_structure.get_dict_by_name("other_tags")
         if tag not in other_tags:
-            # Проверяем лимит
             total_tags = tag_structure.get_total_tag_count()
             limit = tag_structure.get_global_tag_limit()
-            if limit is not None and total_tags >= limit:
-                raise HTTPException(status_code=400, detail="Global tag limit exceeded")
+            if (limit is not None) and (total_tags >= limit):
+                raise HTTPException(status_code=400, detail="Tag limit exceeded")
             other_tags.append(tag)
             tag_structure.set_dict_by_name("other_tags", other_tags)
             result = tag_structure.sync_tags_collection()
-            return {"message": "Tag added to other_tags", "data": other_tags, "r": result}
+            return {"message": "Tag added to other_tags", "result": result}
         else:
-            return {"message": "Tag already exists in other_tags", "data": other_tags}
+            return {"message": "Tag already in other_tags", "other_tags": other_tags}
 
     tag_dict = tag_structure.get_dict_by_name(dict_name)
-    if not isinstance(tag_dict, dict):
-        raise HTTPException(status_code=400, detail="Target dictionary is not a dict")
-
+    if not tag_dict:
+        raise HTTPException(status_code=400, detail="Dict not found")
     total_tags = tag_structure.get_total_tag_count()
     limit = tag_structure.get_global_tag_limit()
-    is_new = tag not in tag_dict
-    if limit is not None and total_tags >= limit and is_new:
-        raise HTTPException(status_code=400, detail="Global tag limit exceeded")
+    if (tag not in tag_dict) and (limit is not None) and total_tags >= limit:
+        raise HTTPException(status_code=400, detail="Tag limit exceeded")
 
-    assoc_list = associations.split() if associations else []
+    associations_list = []
+    if associations:
+        associations_list = associations.split()
 
     if tag in tag_dict:
-        for v in assoc_list:
-            if v not in tag_dict[tag]:
-                tag_dict[tag].append(v)
+        for assoc_tag in associations_list:
+            if assoc_tag not in tag_dict[tag]:
+                tag_dict[tag].append(assoc_tag)
     else:
-        tag_dict[tag] = assoc_list
+        tag_dict[tag] = associations_list
 
     tag_structure.set_dict_by_name(dict_name, tag_dict)
     result = tag_structure.sync_tags_collection()
-    return {"message": "Tag added successfully", "data": tag_dict, "r": result}
+    return {"message": "Tag added successfully", "result": result}
 
 
-@app.delete("/delete_tags")
+@app.delete("/delete_tags", summary="Удалить тег из указанного словаря dict")
 def delete_tags(
         dict_name: Literal["other_tags", "content_tags_dict", "program_tags_dict", "doc_type_dict"] = Query(...),
-        tags: str = Query(...)):
+        tags: str = Query(...)
+):
+    """
+    Удаляет теги из словаря
+    :param dict_name: название словаря
+    :param tags: теги для удаления
+    """
     tag_structure = TagStructure()
     tag_dict = tag_structure.get_dict_by_name(dict_name)
     tags_to_delete = tags.split()
 
-    if isinstance(tag_dict, dict):
+    if tag_dict == "other_tags":
+        tag_dict = []
+        for tag in tag_dict:
+            if tag not in tags_to_delete:
+                tag_dict.append(tag)
+        tag_structure.set_dict_by_name(dict_name, tag_dict)
+        result = tag_structure.sync_tags_collection()
+        return {"message": "Tags deleted successfully", "result": result}
+    else:
         for tag in tags_to_delete:
             tag_dict.pop(tag, None)
         tag_structure.set_dict_by_name(dict_name, tag_dict)
-        result =  tag_structure.sync_tags_collection()
-        return {"message": "Tags deleted successfully", "data": tag_dict}
-    elif isinstance(tag_dict, list):
-        tag_dict = [t for t in tag_dict if t not in tags_to_delete]
-        tag_structure.set_dict_by_name(dict_name, tag_dict)
-        result =  tag_structure.sync_tags_collection()
-        return {"message": "Tags deleted successfully", "data": tag_dict, "r": result}
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported tag storage type")
+        result = tag_structure.sync_tags_collection()
+        return {"message": "Tags deleted successfully", "result": result}
 
 
-@app.get("/get_tags")
-def get_tags():
+@app.get("/get_structure_information", summary="Получить все словари тегов и установленный лимит")
+def get_structure_information():
+    """
+    Возвращает все словари и лимит тегов из config
+    """
     tag_structure = TagStructure()
-    config =  tag_structure.get_config()
+    config = tag_structure.get_config()
     return {
         "content_tags": config.get("content_tags_dict", {}),
         "program_tags": config.get("program_tags_dict", {}),
@@ -420,9 +436,14 @@ def get_tags():
 
 @app.post("/set_limit", summary="Установить глобальный лимит на количество тегов")
 def set_limit(limit: int):
+    """
+    Устанавливает лимит тегов
+    :param limit: лимит тегов
+    """
     tag_structure = TagStructure()
     tag_structure.set_global_tag_limit(limit)
     return {"message": "Global limit updated", "limit": limit}
+
 
 if __name__ == '__main__':
     import uvicorn

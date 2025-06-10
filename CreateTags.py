@@ -3,7 +3,7 @@ import pymorphy3
 
 import Dictionaries
 
-class TagService:
+class TagGenerate:
     """
     Класс функций для извлечения тегов из текста документа
     """

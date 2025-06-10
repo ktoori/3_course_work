@@ -3,7 +3,7 @@ from datetime import datetime
 import pytz
 from fastapi import HTTPException
 
-from CreateTags import TagService
+from CreateTags import TagGenerate
 import Dictionaries
 import SimilarText
 
@@ -187,7 +187,7 @@ class SearchFunction:
         :param query: запрос
         :return: массив релевантных документов
         """
-        tag_methods = TagService()
+        tag_methods = TagGenerate()
         tag_structure = TagStructure()
         query_words = tag_methods.to_nominative_case(query).split()
         keyword_set = set(query_words)
@@ -228,6 +228,103 @@ class SearchFunction:
         return result
 
 
+class TagCollectionChange:
+    """
+    Класс функций по обновлению коллекции tags при добавлении, удалении и редактировании документа в documents
+    """
+
+    def upload_document(self, document_id, lower_tags, file_path):
+        """
+        Функция связывающая доумент и тег при добавлении документа в базу данных
+        :param document_id: ID добавленного документа
+        :param lower_tags: массив тегов документа
+        :param file_path: путь хранения документа
+        """
+
+        tag_structure = TagStructure()
+        tag_associations = tag_structure.tag_associations
+        association_set = tag_structure.association_set
+        use_flag = 0
+
+        for tag in lower_tags:
+            if tag in association_set:
+                use_flag = 1
+                for const_tag, sim_tags in tag_associations.items():
+                    if any(SimilarText.is_similar(st.lower(), tag, threshold=80) for st in sim_tags):
+                        tags_collection.update_one(
+                            {'name': const_tag},
+                            {'$addToSet': {'documents': {'_id': document_id, 'file_path': file_path}}}
+                        )
+                        docs_collection.update_one(
+                            {"_id": document_id},
+                            {"$addToSet": {"tags": const_tag}}
+                        )
+
+        if use_flag == 0:
+            raise HTTPException(status_code=400, detail="Tags are not found")
+
+
+    def delete_document(self, result, doc_id, tags):
+        """
+        Удаляет связь тегов с удаляемым документом
+        :param result: результат удаления документа из documents
+        :param doc_id: ID удаляемого документа
+        :param tags: массив тегов документа
+        """
+
+        tag_structure = TagStructure()
+        const_tags = tag_structure.const_tags
+
+        if result.deleted_count > 0:
+            for tag in tags:
+                if tag in const_tags:
+                    tags_collection.update_one(
+                        {'name': tag},
+                        {'$pull': {'documnets': {'_id': doc_id}}}
+                    )
+        else:
+            HTTPException(status_code=400, detail="Document is not found")
+
+
+    def update_document(self, doc_id, old_tags, new_tags, file_path):
+        """
+        Функция обновляет связь дкоумента с тегами, если список тегов был изменен
+        :param doc_id: ID измененного документа
+        :param old_tags: старые теги
+        :param new_tags: новые теги
+        :param file_path: путь к хранению документа
+        """
+
+        tag_structure = TagStructure()
+        tag_associations = tag_structure.tag_associations
+        association_set = tag_structure.association_set
+        const_tags = tag_structure.const_tags
+        use_flag = 0
+
+        for tag in old_tags:
+            if tag in const_tags:
+                tags_collection.update_one(
+                    {'name': tag},
+                    {'$pull': {'documnets': {'_id': doc_id}}}
+                )
+
+        for tag in new_tags:
+            if tag in association_set:
+                use_flag = 1
+                for const_tag, sim_tags in tag_associations.items():
+                    if any(SimilarText.is_similar(st.lower(), tag, threshold=80) for st in sim_tags):
+                        tags_collection.update_one(
+                            {'name': const_tag},
+                            {'$addToSet': {'documents': {'_id': doc_id, 'file_path': file_path}}}
+                        )
+                        docs_collection.update_one(
+                            {"_id": doc_id},
+                            {"$addToSet": {"tags": const_tag}}
+                        )
+
+        if use_flag == 0:
+            raise HTTPException(status_code=400, detail="Tags are not found")
+
 
 def upload_document_to_db(title, content,file_path, user, tags=None):
     duplicate = docs_collection.find_one({
@@ -256,29 +353,10 @@ def upload_document_to_db(title, content,file_path, user, tags=None):
         "tags": lower_tags if lower_tags else [],
         "created_at": formatted_time
     }
-
     document_id = docs_collection.insert_one(document).inserted_id
 
-    tag_structure = TagStructure()
-    tag_associations = tag_structure.tag_associations
-    association_set = tag_structure.association_set
-
-    use_flag = 0
-    for tag in lower_tags:
-        if tag in association_set:
-            use_flag = 1
-            for const_tag, related_tags in tag_associations.items():
-                if any(SimilarText.is_similar(rt.lower(), tag, threshold=100) for rt in related_tags):
-                    tags_collection.update_one(
-                        {'name': const_tag},
-                        {'$addToSet': {'documents': {'_id': document_id, 'file_path': file_path}}}
-                    )
-                    docs_collection.update_one(
-                        {"_id": document_id},
-                        {"$addToSet": {"tags": const_tag}}
-                    )
-    if use_flag == 0:
-        tags_collection.insert_one({"name": tags[0], "documents": [{'_id': document_id, 'file_path': file_path}]})
+    tags_coll_change = TagCollectionChange()
+    tags_coll_change.upload_document(document_id, lower_tags, file_path)
 
     return document_id
 
@@ -307,19 +385,9 @@ def delete_document_db(doc_id):
             tags = document.get("tags")
         result = docs_collection.delete_one({"_id": doc_id})
 
-        tag_structure = TagStructure()
-        const_tags = tag_structure.const_tags
+        tags_coll_change = TagCollectionChange()
+        tags_coll_change.delete_document(result, doc_id, tags)
 
-        if result.deleted_count > 0:
-            print("Документ успешно удален.")
-            for tag in tags:
-                if tag in const_tags:
-                    tags_collection.update_one(
-                        {'name': tag},
-                        {'$pull': {'documents': {'_id': doc_id}}}
-                    )
-        else:
-            print("Документ не найден.")
         return result.deleted_count
     except Exception as e:
         print(f"Ошибка: {str(e)}")
@@ -342,7 +410,16 @@ def update_document_db(doc_id,new_content,new_file_path, new_tags=None, new_titl
             update_data["title"] = new_title
         if new_tags:
             update_data["tags"] = new_tags
+
+        document = docs_collection.find_one({"_id": doc_id})
+        old_tags = document.get("tags")
+
         result = docs_collection.update_one({"_id": doc_id}, {"$set": update_data})
+
+        tags_coll_change = TagCollectionChange()
+        if new_tags:
+            tags_coll_change.update_document(doc_id, old_tags, new_tags, new_file_path)
+
         if result.modified_count > 0:
             print("Документ успешно обновлен.")
         else:
