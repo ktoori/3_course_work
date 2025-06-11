@@ -51,6 +51,7 @@ def approve_document(doc_id, moderator, final_tags=None):
     from bson import ObjectId
     try:
         doc_id = ObjectId(doc_id)
+
         moscow_tz = pytz.timezone('Europe/Moscow')
         current_time_msk = datetime.now(moscow_tz)
         formatted_time = current_time_msk.strftime('%Y-%m-%d %H:%M:%S')
@@ -58,14 +59,14 @@ def approve_document(doc_id, moderator, final_tags=None):
         doc = moderation_collection.find_one({"_id": doc_id})
         if not doc:
             return False
-
-        # переносим документ в основную коллекцию
-        result = mongoDB.update_document_db(
-            doc["title"],
-            doc["content"],
-            doc["file_path"],
-            doc["user"],
-            final_tags if final_tags else doc["tags"]
+        if doc["status"]!="pending":
+            return False
+        result = mongoDB.upload_document_to_db(
+            title=doc["title"],
+            content=doc["content"],
+            file_path=doc["file_path"],
+            user=doc["user"],
+            tags=final_tags if final_tags else doc["tags"]
         )
 
         if result:
@@ -83,7 +84,6 @@ def approve_document(doc_id, moderator, final_tags=None):
             return True
         return False
     except Exception as e:
-        print(f"Error approving document: {str(e)}")
         return False
 
 
@@ -94,7 +94,11 @@ def reject_document(doc_id, moderator):
         moscow_tz = pytz.timezone('Europe/Moscow')
         current_time_msk = datetime.now(moscow_tz)
         formatted_time = current_time_msk.strftime('%Y-%m-%d %H:%M:%S')
-
+        doc = moderation_collection.find_one({"_id": doc_id})
+        if not doc:
+            return False
+        if doc["status"] != "pending":
+            return False
         update_data = {
             "status": "rejected",
             "moderated_at": formatted_time,

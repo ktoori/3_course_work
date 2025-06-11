@@ -288,7 +288,7 @@ class TagCollectionChange:
 
     def update_document(self, doc_id, old_tags, new_tags, file_path):
         """
-        Функция обновляет связь дкоумента с тегами, если список тегов был изменен
+        Функция обновляет связь документа с тегами, если список тегов был изменен
         :param doc_id: ID измененного документа
         :param old_tags: старые теги
         :param new_tags: новые теги
