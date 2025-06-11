@@ -11,29 +11,36 @@ class TagGenerate:
 
     def __init__(self):
         self.nlp = spacy.load('ru_core_news_sm')
+        self.morph = pymorphy3.MorphAnalyzer()
 
 
     def get_candidates(self, text):
         """
-        Возвращает список фраз и слов - возможных тегов
+        Возвращает словарь фраз и слов - возможных тегов с индексами их вхождения
         :param text: текст документа, обработанный с помощью spacy
         :return: массив тегов
         """
-        candidates = []
+        candidates = {}
         candidates_tokens = []
 
-        for token in text:
+        for i in range(0, len(text)):
+            token = text[i]
+
+            if token.pos_ == "NOUN":
+                candidates.setdefault(self.to_nominative_case(token.text.lower()), []).append(i)
             if token.pos_ in ("ADJ", "NOUN", "PROPN"):
-                candidates_tokens.append(token.text.lower())
+                candidates_tokens.append(self.to_nominative_case(token.text.lower()))
             else:
-                if candidates_tokens:
+                if len(candidates_tokens) == 2:
                     cand_phrase = " ".join(candidates_tokens)
-                    candidates.append(cand_phrase)
+                    candidates.setdefault(cand_phrase, []).append(i - 2)
+                    candidates_tokens = []
+                else:
                     candidates_tokens = []
 
-        if candidates_tokens:
+        if len(candidates_tokens) == 2:
             cand_phrase = " ".join(candidates_tokens)
-            candidates.append(cand_phrase)
+            candidates.setdefault(cand_phrase, []).append(len(text)-2)
 
         return candidates
 
@@ -48,26 +55,16 @@ class TagGenerate:
         total_tokens = len(doc_text)
         features = {}
 
-        for candidate in candidates:
-            if candidate not in features:
-                features[candidate] = {"frequency": 0, "first_enter": total_tokens}
-            features[candidate]["frequency"] += 1
-
-        for candidate in features:
-            candidate_tokens = candidate.split()
-            first_index = total_tokens
-            for i in range(total_tokens - len(candidate_tokens) + 1):
-                window = []
-                for j in range(i, i + len(candidate_tokens)):
-                    window.append(doc_text[j].text.lower())
-                if window == candidate_tokens:
-                    first_index = i
-                    break
-            features[candidate]["first_enter"] = first_index
-
-        for candidate, feat in features.items():
-            pos_score = 1 - (feat["first_enter"]/total_tokens)
-            feat["score"] = feat["frequency"]*pos_score
+        for candidate, positions in candidates.items():
+            first_enter = min(positions)
+            frequency = len(positions)
+            pos_score = 1 - (first_enter/total_tokens)
+            score = frequency*pos_score
+            features[candidate] = {
+                "frequency": frequency,
+                "first_enter": first_enter,
+                "score": score
+            }
 
         return features
 
@@ -78,18 +75,20 @@ class TagGenerate:
         :param phrase: входной текст
         :return: текст в именительном падеже
         """
-        morph = pymorphy3.MorphAnalyzer()
         words = phrase.split()
+
         nominative_words = []
 
         for word in words:
-            word_norm = morph.parse(word)[0].inflect({'sing', 'nomn'})
+            word_norm = self.morph.parse(word)[0].inflect({'sing', 'nomn'})
             if word_norm:
-                nominative_words.append(word_norm)
+                nominative_words.append(word_norm.word)
             else:
                 nominative_words.append(word)
 
-        return ' '.join(nominative_words)
+        if len(nominative_words) == 0:
+            return ""
+        return " ".join(nominative_words)
 
 
     def extract_keywords(self, text, num_keywords=15):
