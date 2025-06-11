@@ -148,14 +148,13 @@ async def approve_moderation_document(
 @app.post("/moderation/reject")
 async def reject_moderation_document(
         doc_id: str = Query(...),
-        moderator: str = Query(...),
-        reason: str = Query(None)
+        admin: str = Query(...)
 ):
     """Отклонить документ после модерации"""
-    if moderator != "admin":
+    if admin != "admin":
         raise HTTPException(status_code=403, detail="Доступ запрещен")
 
-    success = Moderation.reject_document(doc_id, moderator)
+    success = Moderation.reject_document(doc_id, admin)
     if success:
         return {"status": "OK", "message": "Документ отклонен"}
     else:
@@ -226,10 +225,9 @@ async def upload_document(
 
     content = ReadFile.clean_text(content) if content else ""
     file_path = save_file_to_server(file)
-    # Определяем итоговые теги
+
     final_tags = []
 
-    # Добавляем выбранные теги
     if content_tags:
         final_tags.extend(tag.strip() for tag in content_tags if tag.strip())
     if program_track_tags:
@@ -239,13 +237,13 @@ async def upload_document(
     if other_tags:
         final_tags.extend(tag.strip() for tag in other_tags if tag.strip())
     selected_tags= [final_tags]
-    # Добавляем автоматические теги (если включено)
+
     if use_auto_tags:
         tag_service = TagGenerate()
         auto_tags = tag_service.extract_keywords(content)
         final_tags.extend(tag for tag in auto_tags if tag not in final_tags)
 
-    # Если нет тегов - используем имя файла
+
     if not final_tags:
         final_tags.append(Path(file.filename).stem.lower())
 
@@ -320,14 +318,12 @@ async def update_document(file_id: str, file: UploadFile):
             content = ReadFile.extract_xlsx_text(file.file)
         tag_service = TagGenerate()
         tags = tag_service.extract_keywords(content)
-        # Удаляем старый файл с сервера
+
         if os.path.exists(document['file_path']):
             os.remove(document['file_path'])
 
-        # Сохраняем новый файл на сервере
         new_file_path = save_file_to_server(file)
 
-        # Обновляем документ в MongoDB
         modified_count = mongoDB.update_document_db(file_id, content, new_file_path, tags)
         if modified_count > 0:
             return {"message": "Документ успешно обновлен"}
