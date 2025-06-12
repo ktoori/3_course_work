@@ -9,6 +9,18 @@ db = client['database']
 moderation_collection = db["moderation_documents"]
 
 def upload_document_to_moderation(title, content, file_path, user, tags=None):
+    duplicate = moderation_collection.find_one({
+        "$or": [
+            {"title": title},
+            {"file_path": file_path},
+            {"content": content}
+        ]
+    })
+
+    if duplicate:
+        print(f"Документ уже существует в базе данных: {title}")
+        return None
+
     lower_tags = [tag.lower() for tag in tags] if tags else []
 
     moscow_tz = pytz.timezone('Europe/Moscow')

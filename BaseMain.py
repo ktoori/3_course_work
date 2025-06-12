@@ -306,7 +306,9 @@ async def delete_document(file_id: str,user: str = Form("user")):
 
 
 @app.put("/update_document")
-async def update_document(file_id: str, file: UploadFile):
+async def update_document(file_id: str, file: UploadFile,user: str = Form("user")):
+    if user != "admin":
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
     document = mongoDB.get_document_db(file_id)
     if document:
         content = ""
