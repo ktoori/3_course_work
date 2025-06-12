@@ -7,7 +7,7 @@ from typing import BinaryIO
 import io
 
 
-# удаляем лишние пробелы и nan
+
 def clean_text(text: str) -> str:
     cleaned_text = re.sub(r'\bnan*\b', '', text, flags=re.IGNORECASE)
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
@@ -38,11 +38,3 @@ async def extract_xlsx_text(file: BinaryIO) -> str:
             if pd.notna(cell) and str(cell).strip()
         ))
 
-async def extract_content(file: UploadFile) -> str:
-    if file.filename.endswith('.pdf'):
-        return await extract_pdf_text(file.file)
-    elif file.filename.endswith('.docx'):
-        return await extract_docx_text(file.file)
-    elif file.filename.endswith('.xlsx'):
-        return await extract_xlsx_text(file.file)
-    raise ValueError("Unsupported file format")
