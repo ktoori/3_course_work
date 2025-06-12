@@ -289,13 +289,13 @@ async def download_document(file_id: str):
         raise HTTPException(status_code=404, detail="Файл не найден")
 
 @app.delete("/delete_document")
-async def delete_document(file_id: str):
+async def delete_document(file_id: str,user: str = Form("user")):
+    if user != "admin":
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
     document = mongoDB.get_document_db(file_id)
     if document:
-        # Удаляем файл с сервера
         if os.path.exists(document['file_path']):
             os.remove(document['file_path'])
-        # Удаляем документ из MongoDB
         deleted_count = mongoDB.delete_document_db(file_id)
         if deleted_count > 0:
             return {"message": "Документ успешно удален"}
