@@ -250,7 +250,7 @@ class TagCollectionChange:
             if tag in association_set:
                 use_flag = 1
                 for const_tag, sim_tags in tag_associations.items():
-                    if any(SimilarText.is_similar(st.lower(), tag, threshold=80) for st in sim_tags):
+                    if any(SimilarText.is_similar(st.lower(), tag, threshold=95) for st in sim_tags):
                         tags_collection.update_one(
                             {'name': const_tag},
                             {'$addToSet': {'documents': {'_id': document_id, 'file_path': file_path}}}
@@ -280,7 +280,7 @@ class TagCollectionChange:
                 if tag in const_tags:
                     tags_collection.update_one(
                         {'name': tag},
-                        {'$pull': {'documnets': {'_id': doc_id}}}
+                        {'$pull': {'documents': {'_id': doc_id}}}
                     )
         else:
             HTTPException(status_code=400, detail="Document is not found")

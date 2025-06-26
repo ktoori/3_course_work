@@ -91,7 +91,7 @@ class TagGenerate:
         return " ".join(nominative_words)
 
 
-    def extract_keywords(self, text, num_keywords=15):
+    def extract_keywords(self, text, num_keywords=5):
         """
         Функция извлечения ключевого слова из текста
         :param text: текст документа
